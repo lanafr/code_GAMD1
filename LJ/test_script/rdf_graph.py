@@ -2,35 +2,37 @@ from rdfpy import rdf
 import matplotlib.pyplot as plt
 import numpy as np
 
-t=5
-
-def get_dimensions(lst):
-    if isinstance(lst, list):
-        return [len(lst)] + get_dimensions(lst[0])
-    else:
-        return []
+t=3
 
 NUM_OF_ATOMS=256
 
-
 coords_real = np.empty((NUM_OF_ATOMS,3))
+coords_model = np.empty((NUM_OF_ATOMS,3))
 
-for i in range(NUM_OF_ATOMS-1):
+#put the coordinates of all atoms at time t in a numpy array for the simulation ran by OpenMM
+
+for i in range(NUM_OF_ATOMS):
     pos = np.load(f'md_dataset/lj_data_to_test/data_0_{t}.npz')['pos'][i]
     coords_real[i,]=pos
 
-print(coords_real.T.shape)
+#make a radial graph
+g_r_real, radii_real = rdf(coords_real, dr=0.07)
 
+#put the coordinates of all atoms at time t in a numpy array ran by our model
 
-g_r_real, radii_real = rdf(coords_real, dr=4)
-"""
+for i in range(NUM_OF_ATOMS):
+    pos = np.load(f'md_dataset/lj_data_tested/data_test1_{t}.npz')['pos'][i]
+    coords_model[i,]=pos
 
-pos = np.load(f'md_dataset/lj_data_tested/data_test1_{t}.npz')['pos']
-coords_real.append(pos)
-transposed_coords_model = [list(x) for x in zip(*coords_model)]
-
-g_r_real, radii_real = rdf(coords_real, dr=0.1)
+#make rdf graph
 g_r_model, radii_model = rdf(coords_model, dr=0.1)
 
-plt.plot(g_r_real, radii_real)
-"""
+print(coords_model)
+
+
+#see the graph
+plt.plot(radii_real, g_r_real)
+plt.savefig('rdf_graph_real.png')
+
+plt.plot(radii_model, g_r_model)
+plt.savefig('rdf_graph_model.png')
