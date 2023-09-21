@@ -1,0 +1,11 @@
+/README.md
+/__pycache__
+/LJ/__pycache__
+/LJ/GAMDnew
+/LJ/md_dataset
+/LJ/model_ckpt
+/LJ/model_ckpt_lj
+/LJ/wandb
+/LJ/init_pos.npy
+/LJ/log_nvt_lj_0.txt
+/water
