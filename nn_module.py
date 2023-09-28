@@ -12,7 +12,7 @@ from sklearn.preprocessing import StandardScaler
 from typing import List, Set, Dict, Tuple, Optional
 
 from torchdyn.core import NeuralODE
-from torchdyn import *
+from torchdyn import *  
 from torchdyn.models import *
 from torchdyn.nn import *
 
@@ -611,7 +611,8 @@ class SimpleMDNetNew(nn.Module):  # no bond, no learnable node encoder
             self.box_size = box_size
         self.box_size = self.box_size
 
-        self.node_emb = nn.Parameter(torch.randn((1, encoding_size)), requires_grad=True)
+        self.node_encoder = MLP(3, encoding_size, hidden_layer=2, hidden_dim=hidden_dim, activation='gelu')
+        #self.node_emb = nn.Parameter(torch.randn((1, encoding_size)), requires_grad=True)
         self.edge_encoder = MLP(3 + 1 + len(self.edge_expand.centers), self.edge_emb_dim, hidden_dim=hidden_dim,
                                 activation='gelu')
         self.edge_layer_norm = nn.LayerNorm(self.edge_emb_dim)
@@ -677,6 +678,9 @@ class SimpleMDNetNew(nn.Module):  # no bond, no learnable node encoder
         fluid_edge_emb = self.edge_drop_out(fluid_edge_emb)
         fluid_graph.edata['e'] = fluid_edge_emb
 
+        #add node embeddings
+        fluid_graph.ndata['e'] = self.node_encoder(fluid_pos)
+
         # add self loop for fluid particles
         if self_loop:
             fluid_graph.add_self_loop()
@@ -699,6 +703,8 @@ class SimpleMDNetNew(nn.Module):  # no bond, no learnable node encoder
             length = length.detach().cpu().numpy().reshape(-1, 1)
         self.length_scaler.partial_fit(length)
 
+    
+
     def forward(self,
                 fluid_pos_lst: List[torch.Tensor],  # list of [N, 3]
                 fluid_edge_lst: List[torch.Tensor]
@@ -707,9 +713,28 @@ class SimpleMDNetNew(nn.Module):  # no bond, no learnable node encoder
             fluid_graph = self.build_graph_batches(fluid_pos_lst, fluid_edge_lst)
         else:
             fluid_graph = self.build_graph(fluid_edge_lst[0], fluid_pos_lst[0])
-        num = np.sum([pos.shape[0] for pos in fluid_pos_lst])
-        x = self.node_emb.repeat((num, 1))
-        x = self.graph_conv(x, fluid_graph)
+        #num = np.sum([pos.shape[0] for pos in fluid_pos_lst])
+        #x = self.node_emb.repeat((num, 1))
+
+        #fluid_pos = [fluid_pos_lst for _ in range(len(fluid_pos_lst))]
+        #fluid_pos_cat = torch.stack(fluid_pos_lst, dim=0)
+        #print(fluid_pos_cat.shape)
+        #x = self.node_encoder(fluid_pos_cat)
+        #print(x.shape)
+        #x = x.view(len(fluid_pos_lst), -1, x.size(-1))
+        #split_tensors = torch.split(x, split_size_or_sections=len(fluid_pos_lst), dim=0)
+        #x = torch.cat(split_tensors, dim=0)
+        #print(x.shape)
+        #x = self.graph_conv(x, fluid_graph)
+        x=self.graph_conv(fluid_graph.ndata['e'],fluid_graph)
+
+        """
+        #here we will turn the list of tensors into one big tensor
+        fluid_pos = torch.cat(fluid_pos_lst, dim=0)
+        x = self.node_encoder(fluid_pos) # this probably shouldn't be a list and we have to see how to do it in batches
+        encoded_pos_split = torch.split(x, split_size_or_sections=len(fluid_pos_lst), dim=0)
+        x = self.graph_conv(encoded_pos_split, fluid_graph)
+        """
 
         #x_tuple = self.graph_decoder(x)
         x = self.graph_decoder(x)
