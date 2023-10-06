@@ -2,9 +2,9 @@ from rdfpy import rdf
 import matplotlib.pyplot as plt
 import numpy as np
 
-t=3
+t=999
 
-NUM_OF_ATOMS=256
+NUM_OF_ATOMS=258
 
 coords_real = np.empty((NUM_OF_ATOMS,3))
 coords_model = np.empty((NUM_OF_ATOMS,3))
@@ -16,7 +16,7 @@ for i in range(NUM_OF_ATOMS):
     coords_real[i,]=pos
 
 #make a radial graph
-g_r_real, radii_real = rdf(coords_real, dr=0.07)
+g_r_real, radii_real = rdf(coords_real, dr=0.1)
 
 #put the coordinates of all atoms at time t in a numpy array ran by our model
 

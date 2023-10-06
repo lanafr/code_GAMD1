@@ -90,7 +90,7 @@ class NeuralOrdinaryDE(nn.Module):
     
     def forward(self, x):
         return self.model(x)
-
+        
 
 class SmoothConvLayerNew(nn.Module):
     def __init__(self,
@@ -100,6 +100,7 @@ class SmoothConvLayerNew(nn.Module):
                  hidden_dim=128,
                  activation='relu',
                  drop_edge=True,
+                 #drop_edge=False,
                  update_edge_emb=False):
 
         super(SmoothConvLayerNew, self).__init__()
@@ -582,7 +583,7 @@ class SimpleMDNetNew(nn.Module):  # no bond, no learnable node encoder
                  box_size,   # can also be array
                  hidden_dim=128,
                  conv_layer=4,
-                 edge_embedding_dim=128,
+                 edge_embedding_dim=256,
                  dropout=0.1,
                  drop_edge=True,
                  use_layer_norm=False):

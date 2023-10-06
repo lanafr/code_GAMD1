@@ -217,7 +217,7 @@ class ParticleNetLightning(pl.LightningModule):
         edge_idx_tsr = self.get_edge_idx(nbrs, pos_jax, edge_mask_all)
         return edge_idx_tsr.long()
 
-    def training_step(self, batch, batch_nb):
+    def training_step(self, batch):
         pos_lst = batch['pos']
         #gt_lst = batch['forces']
         #gt_lst=batch['pos_next']
@@ -226,15 +226,6 @@ class ParticleNetLightning(pl.LightningModule):
         
         for b in range(len(gt_lst)):
             pos, gt = pos_lst[b], gt_lst[b]
-
-            if self.rotate_aug: #I should probably do it without this as it makes it harder to track molecules over time and also could mess up jump functions in the future
-                pos = np.mod(pos, BOX_SIZE)
-                pos, off = center_positions(pos)
-                R = get_rotation_matrix()
-                pos = np.matmul(pos, R)
-                pos += off
-                gt = np.matmul(gt, R)
-                gt += off #this I added bc gt is no longer forces but coordinates which are not centred as forces
 
             pos = np.mod(pos, BOX_SIZE) #also this should trivially be true if the simulations are correct
             gt = np.mod(gt, BOX_SIZE) #this I added
@@ -289,7 +280,7 @@ class ParticleNetLightning(pl.LightningModule):
                                seed_num=10,
                                mode='train')
 
-        return DataLoader(dataset, num_workers=2, batch_size=self.batch_size, shuffle=True, # I changed shuffle from True to False to see how it effects the training and validation
+        return DataLoader(dataset, num_workers=2, batch_size=self.batch_size, shuffle=False, # I changed shuffle from True to False to see how it effects the training and validation
                           collate_fn=
                           lambda batches: {
                               'pos': [batch['pos'] for batch in batches],

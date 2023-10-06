@@ -85,7 +85,7 @@ class LJDataNew(Dataset):
         self.mode = mode
         assert mode in ['train', 'test']
         idxs = np.arange(seed_num*sample_num)
-        np.random.seed(0)   # fix same random seed
+        #np.random.seed(0)   # fix same random seed: Setting a random seed ensures that the random shuffling of idxs will be the same every time you run your code, making your results reproducible.
         np.random.shuffle(idxs)
         ratio = split[0]
         if mode == 'train':
@@ -127,8 +127,8 @@ class LJDataNew(Dataset):
         fname = f'data_{seed}_{sample_to_read}'#f'seed_{seed_to_read}_data_{sample_to_read}'
         fname_next = f'data_{seed}_{sample_to_read_next}'
 
-        #fname = f'data_4_331'
-        #fname_next = f'data_4_332'
+        #fname = f'data_4_555'
+        #fname_next = f'data_4_555'
 
         data_path = os.path.join(self.dataset_path, fname)
         data_path_next = os.path.join(self.dataset_path, fname_next)

@@ -14,6 +14,7 @@ import torch
 import numpy as np
 from torch.utils.data import DataLoader
 from types import SimpleNamespace
+import torch.nn as nn
 
 dataset = LJDataNew(dataset_path='/home/guests/lana_frkin/GAMDplus/code/LJ/md_dataset/lj_data',
                    sample_num=999,
@@ -29,12 +30,12 @@ dataloader = DataLoader(dataset, num_workers=2, batch_size=1, shuffle=False,
                               'pos_next': [batch['pos_next'] for batch in batches],
                           })
 
-PATH = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt_lj/checkpoint.ckpt'
-SCALER_CKPT = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt_lj/scaler.npz'
-args = SimpleNamespace(use_layer_norm=True,
+PATH = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/autoencoder_try5_batch16_and_drop_edge_false/checkpoint_29.ckpt'
+SCALER_CKPT = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/autoencoder_try5_batch16_and_drop_edge_false/scaler_29.npz'
+args = SimpleNamespace(use_layer_norm=False,
                        encoding_size=128,
-                       hidden_dim=128,
-                       edge_embedding_dim=128,
+                       hidden_dim=256,
+                       edge_embedding_dim=256,
                       drop_edge=False,
                        conv_layer=4,
                       rotate_aug=False,
@@ -88,6 +89,8 @@ print(f'std of RMSE per sample: {np.std([np.sqrt(se[i]/num[i]) for i in range(le
 
 
 """
+#this part is for generating data by the model
+"""
 pos_init_all = np.load('md_dataset/lj_data_to_test/data_0_0.npz')
 pos_init = pos_init_all['pos']
 
@@ -101,3 +104,27 @@ for i in range(1000):
                  pos=pos)
     pos_next = model.predict_nextpos(pos)
     pos=pos_next
+"""
+
+#this part is to check how well the autoencoder works on a test set
+pos_lst=[]
+gt_lst=[]
+
+for i in range(999):
+
+    gt_all = np.load(f'md_dataset/lj_data_to_test/data_0_{i}.npz')
+    gt = gt_all['pos']
+    gt_lst.append(gt)
+
+    pos_hopefully_same = model.predict_nextpos(gt)
+    pos_lst.append(pos_hopefully_same)
+
+gt_lst = [torch.from_numpy(arr) for arr in gt_lst]
+gt_cat = torch.cat(gt_lst, dim=0)
+pos_lst = [torch.from_numpy(arr) for arr in pos_lst]
+pos_cat = torch.cat(pos_lst, dim=0)
+
+mae = nn.L1Loss()(pos_cat, gt_cat)
+
+print("Loss is:")
+print(mae)
