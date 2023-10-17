@@ -482,7 +482,7 @@ def main():
     parser.add_argument('--min_epoch', default=30, type=int)
     parser.add_argument('--max_epoch', default=30, type=int)
     parser.add_argument('--lr', default=3e-4, type=float)
-    parser.add_argument('--cp_dir', default='./model_ckpt/autoencoder_try5_batch16_and_drop_edge_false')
+    parser.add_argument('--cp_dir', default='./model_ckpt/autoencoder_for_graphs')
     parser.add_argument('--state_ckpt_dir', default=None, type=str)
     parser.add_argument('--batch_size', default=1, type=int)
     parser.add_argument('--encoding_size', default=128, type=int)

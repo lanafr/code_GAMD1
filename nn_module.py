@@ -8,6 +8,8 @@ from dgl.utils import expand_as_pair
 import time
 from md_module import get_neighbor
 from sklearn.preprocessing import StandardScaler
+import random
+import os, sys
 
 from typing import List, Set, Dict, Tuple, Optional
 
@@ -281,301 +283,6 @@ class RBFExpansion(nn.Module):
         return torch.exp(coef * (radial ** 2))
 
 
-class WaterMDDynamicBoxNet(nn.Module):
-    def __init__(self,
-                 in_feats,
-                 encoding_size,
-                 out_feats,
-                 bond=None,       #
-                 hidden_dim=128,
-                 conv_layer=4,
-                 edge_embedding_dim=128,
-                 dropout=0.1,
-                 drop_edge=True,
-                 use_layer_norm=False,
-                 update_edge=False,
-                 expand_edge=True):
-        super(WaterMDDynamicBoxNet, self).__init__()
-        self.graph_conv = SmoothConvBlockNew(in_node_feats=encoding_size,
-                                              out_node_feats=encoding_size,
-                                              hidden_dim=hidden_dim,
-                                              conv_layer=conv_layer,
-                                              edge_emb_dim=edge_embedding_dim,
-                                              use_layer_norm=use_layer_norm,
-                                              use_batch_norm=not use_layer_norm,
-                                              drop_edge=drop_edge,
-                                              activation='silu',
-                                              update_egde_emb=update_edge)
-
-        self.edge_emb_dim = edge_embedding_dim
-        self.expand_edge = expand_edge
-        if self.expand_edge:
-            self.edge_expand = RBFExpansion(high=1, gap=0.025)
-        self.edge_drop_out = nn.Dropout(dropout)
-        self.use_bond = not bond is None
-
-        self.length_mean = nn.Parameter(torch.tensor([0.]), requires_grad=False)
-        self.length_std = nn.Parameter(torch.tensor([1.]), requires_grad=False)
-        self.length_scaler = StandardScaler()
-
-        self.node_encoder = nn.Linear(in_feats, encoding_size)
-        if bond is not None:
-            if self.expand_edge:
-                self.edge_encoder = MLP(4 + 1 + len(self.edge_expand.centers), self.edge_emb_dim, hidden_dim=hidden_dim,
-                                        activation='gelu')
-            else:
-                self.edge_encoder = MLP(4 + 1, self.edge_emb_dim, hidden_dim=hidden_dim,
-                                        activation='gelu')
-            self.bond_graph = self.build_bond_graph(bond)
-        else:
-            if self.expand_edge:
-                self.edge_encoder = MLP(3 + 1 + len(self.edge_expand.centers), self.edge_emb_dim, hidden_dim=hidden_dim,
-                                        activation='gelu')
-            else:
-                self.edge_encoder = MLP(3 + 1, self.edge_emb_dim, hidden_dim=hidden_dim,
-                                        activation='gelu')
-        self.edge_layer_norm = nn.LayerNorm(self.edge_emb_dim)
-        self.graph_decoder = MLP(encoding_size, out_feats, hidden_layer=2, hidden_dim=hidden_dim, activation='gelu')
-
-    def calc_edge_feat(self, rel_pos_periodic, rel_pos_norm):
-
-        if self.training:
-            self.fit_length(rel_pos_norm)
-            self._update_length_stat(self.length_scaler.mean_, np.sqrt(self.length_scaler.var_))
-        rel_pos_periodic = -rel_pos_periodic / (rel_pos_norm + 1e-8)
-        rel_pos_norm = (rel_pos_norm - self.length_mean) / self.length_std
-        if self.expand_edge:
-            edge_feat = torch.cat((rel_pos_periodic,
-                                   rel_pos_norm,
-                                   self.edge_expand(rel_pos_norm)), dim=1)
-        else:
-            edge_feat = torch.cat((rel_pos_periodic,
-                                   rel_pos_norm), dim=1)
-        return edge_feat
-
-    def build_graph(self, fluid_pos, cutoff, box_size, self_loop=True):
-        if isinstance(box_size, torch.Tensor):
-            box_size = box_size.to(fluid_pos.device)
-        elif isinstance(box_size, np.ndarray):
-            box_size = torch.from_numpy(box_size).to(fluid_pos.device)
-
-        with torch.no_grad():
-            edge_idx, distance, distance_norm, _ = get_neighbor(fluid_pos,
-                                                                cutoff, box_size)
-        center_idx = edge_idx[0, :]  # [edge_num, 1]
-        neigh_idx = edge_idx[1, :]
-        fluid_graph = dgl.graph((neigh_idx, center_idx))
-        fluid_edge_feat = self.calc_edge_feat(distance, distance_norm.view(-1, 1))
-        if not self.use_bond:
-            fluid_edge_emb = self.edge_layer_norm(self.edge_encoder(fluid_edge_feat)) # [edge_num, 64]
-            fluid_edge_emb = self.edge_drop_out(fluid_edge_emb)
-            fluid_graph.edata['e'] = fluid_edge_emb
-        else:
-            edge_type = self.bond_graph.has_edges_between(center_idx, neigh_idx)
-            fluid_edge_feat = torch.cat((fluid_edge_feat, edge_type.view(-1, 1)), dim=1)
-            fluid_edge_emb = self.edge_layer_norm(self.edge_encoder(fluid_edge_feat))  # [edge_num, 64]
-            fluid_edge_emb = self.edge_drop_out(fluid_edge_emb)
-            fluid_graph.edata['e'] = fluid_edge_emb
-
-        # add self loop for fluid particles
-        if self_loop:
-            fluid_graph.add_self_loop()
-        return fluid_graph
-
-    def build_graph_batches(self, pos_lst, box_size_lst, cutoff):
-        graph_lst = []
-        for pos, box_size in zip(pos_lst, box_size_lst):
-            graph = self.build_graph(pos, cutoff, box_size)
-            graph_lst += [graph]
-        batched_graph = dgl.batch(graph_lst)
-        return batched_graph
-
-    def build_bond_graph(self, bond):
-        if isinstance(bond, np.ndarray):
-            bond = torch.from_numpy(bond).cuda()
-        bond_graph = dgl.graph((bond[:, 0], bond[:, 1]))
-        bond_graph = dgl.add_reverse_edges(bond_graph)  # undirectional and symmetry
-        return bond_graph
-
-    def _update_length_stat(self, new_mean, new_std):
-        self.length_mean[0] = new_mean[0]
-        self.length_std[0] = new_std[0]
-
-    def fit_length(self, length):
-        if not isinstance(length, np.ndarray):
-            length = length.detach().cpu().numpy().reshape(-1,1)
-        self.length_scaler.partial_fit(length)
-
-    def forward(self,
-                fluid_pos_lst,  #   list of [N, 3]
-                x,  # node feature    # [b*N, 3]
-                box_size_lst,   #   list of scalar
-                cutoff          # a scalar
-                ):
-        # fluid_graph = self.build_graph(fluid_pos, cutoff, box_size)
-        if len(fluid_pos_lst) > 1:
-            fluid_graph = self.build_graph_batches(fluid_pos_lst, box_size_lst, cutoff)
-        else:
-            fluid_graph = self.build_graph(fluid_pos_lst[0], cutoff, box_size_lst[0])
-
-        x = self.node_encoder(x)
-        x = self.graph_conv(x, fluid_graph)
-
-        x = self.graph_decoder(x)
-        return x
-
-
-class WaterMDNetNew(nn.Module):
-    def __init__(self,
-                 in_feats,
-                 encoding_size,
-                 out_feats,
-                 box_size,   # can also be array
-                 bond=None,       #
-                 hidden_dim=128,
-                 conv_layer=4,
-                 edge_embedding_dim=128,
-                 dropout=0.1,
-                 drop_edge=True,
-                 use_layer_norm=False):
-        super(WaterMDNetNew, self).__init__()
-        self.graph_conv = SmoothConvBlockNew(in_node_feats=encoding_size,
-                                             out_node_feats=encoding_size,
-                                             hidden_dim=hidden_dim,
-                                             conv_layer=conv_layer,
-                                             edge_emb_dim=edge_embedding_dim,
-                                             use_layer_norm=use_layer_norm,
-                                             use_batch_norm=not use_layer_norm,
-                                             drop_edge=drop_edge,
-                                             activation='silu')
-
-        self.edge_emb_dim = edge_embedding_dim
-        self.edge_expand = RBFExpansion(high=1, gap=0.025)
-        self.edge_drop_out = nn.Dropout(dropout)
-        self.use_bond = not bond is None
-
-        self.length_mean = nn.Parameter(torch.tensor([0.]), requires_grad=False)
-        self.length_std = nn.Parameter(torch.tensor([1.]), requires_grad=False)
-        self.length_scaler = StandardScaler()
-
-        if isinstance(box_size, np.ndarray):
-            self.box_size = torch.from_numpy(box_size).float()
-        else:
-            self.box_size = box_size
-        self.box_size = self.box_size
-
-        self.node_encoder = nn.Linear(in_feats, encoding_size)
-        if bond is not None:
-            self.edge_encoder = MLP(4 + 1 + len(self.edge_expand.centers), self.edge_emb_dim, hidden_dim=hidden_dim,
-                                    activation='gelu')
-            self.use_bond = True
-            self.bond_graph = self.build_bond_graph(bond)
-        else:
-            self.edge_encoder = MLP(3 + 1 + len(self.edge_expand.centers), self.edge_emb_dim, hidden_dim=hidden_dim,
-                                    activation='gelu')
-            self.use_bond = False
-        self.edge_layer_norm = nn.LayerNorm(self.edge_emb_dim)
-        self.graph_decoder = MLP(encoding_size, out_feats, hidden_layer=2, hidden_dim=hidden_dim, activation='gelu')
-
-    def calc_edge_feat(self,
-                       src_idx: torch.Tensor,
-                       dst_idx: torch.Tensor,
-                       pos_src: torch.Tensor,
-                       pos_dst=None) -> torch.Tensor:
-        # this is the raw input feature
-
-        # to enhance computation performance, dont track their calculation on graph
-        if pos_dst is None:
-            pos_dst = pos_src
-
-        with torch.no_grad():
-            rel_pos = pos_dst[dst_idx.long()] - pos_src[src_idx.long()]
-            if isinstance(self.box_size, torch.Tensor):
-                rel_pos_periodic = torch.remainder(rel_pos + 0.5 * self.box_size.to(rel_pos.device),
-                                                   self.box_size.to(rel_pos.device)) - 0.5 * self.box_size.to(rel_pos.device)
-            else:
-                rel_pos_periodic = torch.remainder(rel_pos + 0.5 * self.box_size,
-                                                   self.box_size) - 0.5 * self.box_size
-
-            rel_pos_norm = rel_pos_periodic.norm(dim=1).view(-1, 1)  # [edge_num, 1]
-            rel_pos_periodic /= rel_pos_norm + 1e-8   # normalized
-
-        if self.training:
-            self.fit_length(rel_pos_norm)
-            self._update_length_stat(self.length_scaler.mean_, np.sqrt(self.length_scaler.var_))
-
-        rel_pos_norm = (rel_pos_norm - self.length_mean) / self.length_std
-        edge_feat = torch.cat((rel_pos_periodic,
-                               rel_pos_norm,
-                               self.edge_expand(rel_pos_norm)), dim=1)
-        return edge_feat
-
-    def build_graph(self,
-                    fluid_edge_idx: torch.Tensor,
-                    fluid_pos: torch.Tensor,
-                    self_loop=True) -> dgl.DGLGraph:
-
-        center_idx = fluid_edge_idx[0, :]  # [edge_num, 1]
-        neigh_idx = fluid_edge_idx[1, :]
-        fluid_graph = dgl.graph((neigh_idx, center_idx))
-        fluid_edge_feat = self.calc_edge_feat(center_idx, neigh_idx, fluid_pos)
-
-        if not self.use_bond:
-            fluid_edge_emb = self.edge_layer_norm(self.edge_encoder(fluid_edge_feat))  # [edge_num, 64]
-            fluid_edge_emb = self.edge_drop_out(fluid_edge_emb)
-            fluid_graph.edata['e'] = fluid_edge_emb
-        else:
-            edge_type = self.bond_graph.has_edges_between(center_idx, neigh_idx)
-            fluid_edge_feat = torch.cat((fluid_edge_feat, edge_type.view(-1, 1)), dim=1)
-            fluid_edge_emb = self.edge_layer_norm(self.edge_encoder(fluid_edge_feat))  # [edge_num, 64]
-            fluid_edge_emb = self.edge_drop_out(fluid_edge_emb)
-            fluid_graph.edata['e'] = fluid_edge_emb
-
-        # add self loop for fluid particles
-        if self_loop:
-            fluid_graph.add_self_loop()
-        return fluid_graph
-
-    def build_graph_batches(self, pos_lst, edge_idx_lst):
-        graph_lst = []
-        for pos, edge_idx in zip(pos_lst, edge_idx_lst):
-            graph = self.build_graph(edge_idx, pos)
-            graph_lst += [graph]
-        batched_graph = dgl.batch(graph_lst)
-        return batched_graph
-
-    def build_bond_graph(self, bond) -> dgl.DGLGraph:
-        if isinstance(bond, np.ndarray):
-            bond = torch.from_numpy(bond).cuda()
-        bond_graph = dgl.graph((bond[:, 0], bond[:, 1]))
-        bond_graph = dgl.add_reverse_edges(bond_graph)  # undirectional and symmetry
-        return bond_graph
-
-    def _update_length_stat(self, new_mean, new_std):
-        self.length_mean[0] = new_mean[0]
-        self.length_std[0] = new_std[0]
-
-    def fit_length(self, length):
-        if not isinstance(length, np.ndarray):
-            length = length.detach().cpu().numpy().reshape(-1, 1)
-        self.length_scaler.partial_fit(length)
-
-    def forward(self,
-                fluid_pos_lst: List[torch.Tensor],  # list of [N, 3]
-                x: torch.Tensor,  # node feature    # [b*N, 3]
-                fluid_edge_lst: List[torch.Tensor]
-                ) -> torch.Tensor:
-        if len(fluid_pos_lst) > 1:
-            fluid_graph = self.build_graph_batches(fluid_pos_lst, fluid_edge_lst)
-        else:
-            fluid_graph = self.build_graph(fluid_edge_lst[0], fluid_pos_lst[0])
-        x = self.node_encoder(x)
-        x = self.graph_conv(x, fluid_graph)
-
-        x = self.graph_decoder(x)
-        return x
-
-
 class SimpleMDNetNew(nn.Module):  # no bond, no learnable node encoder
     def __init__(self,
                  encoding_size,
@@ -613,22 +320,10 @@ class SimpleMDNetNew(nn.Module):  # no bond, no learnable node encoder
         self.box_size = self.box_size
 
         self.node_encoder = MLP(3, encoding_size, hidden_layer=2, hidden_dim=hidden_dim, activation='gelu')
-        #self.node_emb = nn.Parameter(torch.randn((1, encoding_size)), requires_grad=True)
         self.edge_encoder = MLP(3 + 1 + len(self.edge_expand.centers), self.edge_emb_dim, hidden_dim=hidden_dim,
                                 activation='gelu')
         self.edge_layer_norm = nn.LayerNorm(self.edge_emb_dim)
         self.graph_decoder = MLP(encoding_size, out_feats, hidden_layer=2, hidden_dim=hidden_dim, activation='gelu')
-        #self.enddd = nn.Linear(encoding_size, out_feats) <----  mineeeee
-        #f = nn.Sequential(DataControl(),
-         #       nn.Linear (encoding_size + encoding_size,256),
-          #      nn.Tanh(),
-           #     nn.Linear(256,128),
-            #    nn.Tanh(),
-             #   nn.Linear(128, encoding_size))
-        #t_span = torch.linspace(0, 1, 2)
-        #self.graph_decoder = NeuralOrdinaryDE(nn.Sequential(nn.Linear(encoding_size, 32), nn.ReLU(), nn.Linear(32,16), nn.ReLU(), nn.Linear(16, encoding_size)), sensitivity="adjoint", solver="rk4")
-        #self.graph_decoder = NeuralOrdinaryDE(f, sensitivity='interpolated_adjoint', solver='tsit5')
-        #self.enddd = nn.Linear(encoding_size, out_feats)
 
 
 
@@ -714,32 +409,17 @@ class SimpleMDNetNew(nn.Module):  # no bond, no learnable node encoder
             fluid_graph = self.build_graph_batches(fluid_pos_lst, fluid_edge_lst)
         else:
             fluid_graph = self.build_graph(fluid_edge_lst[0], fluid_pos_lst[0])
-        #num = np.sum([pos.shape[0] for pos in fluid_pos_lst])
-        #x = self.node_emb.repeat((num, 1))
-
-        #fluid_pos = [fluid_pos_lst for _ in range(len(fluid_pos_lst))]
-        #fluid_pos_cat = torch.stack(fluid_pos_lst, dim=0)
-        #print(fluid_pos_cat.shape)
-        #x = self.node_encoder(fluid_pos_cat)
-        #print(x.shape)
-        #x = x.view(len(fluid_pos_lst), -1, x.size(-1))
-        #split_tensors = torch.split(x, split_size_or_sections=len(fluid_pos_lst), dim=0)
-        #x = torch.cat(split_tensors, dim=0)
-        #print(x.shape)
-        #x = self.graph_conv(x, fluid_graph)
+        
         x=self.graph_conv(fluid_graph.ndata['e'],fluid_graph)
 
-        """
-        #here we will turn the list of tensors into one big tensor
-        fluid_pos = torch.cat(fluid_pos_lst, dim=0)
-        x = self.node_encoder(fluid_pos) # this probably shouldn't be a list and we have to see how to do it in batches
-        encoded_pos_split = torch.split(x, split_size_or_sections=len(fluid_pos_lst), dim=0)
-        x = self.graph_conv(encoded_pos_split, fluid_graph)
-        """
+        folder_path = "LJ/graphs_to_train"
+        os.makedirs(folder_path, exist_ok=True)
 
-        #x_tuple = self.graph_decoder(x)
+        lol = random.uniform(0, 100000)
+
+        graph_filename = os.path.join(folder_path, f"graph{lol}.dgl")
+        dgl.save_graphs(graph_filename, fluid_graph)
+
         x = self.graph_decoder(x)
         
-        #x = torch.tensor(x_tuple[1][1])
-        #x=self.enddd(x)
         return x
