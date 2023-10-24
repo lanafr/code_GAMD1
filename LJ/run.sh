@@ -55,10 +55,11 @@ export WANDB_API_KEY=75b2f740e6817e165e204770a9185c4c98ba649d
 #export CUDA_LAUNCH_BLOCKING=1.
 export PATH="/home/guests/lana_frkin/.local/bin:$PATH"
 #python train_network_lj.py # --cuda
+python train_autoencoder.py
 #jupyter execute test_script/lj.ipynb
 #python test_script/test_langevin.py
 #python generate_lj_data.py
-python generate_lj_data_from_model.py
+#python generate_lj_data_from_model.py
 #python test_script/rdf_graph.py
 #python test_script/test_nosehoover.py
 #python train_network_lj.py  --batch_size=1 --encoding_size 8 --hidden_dim 8 --edge_embedding_dim 8 --loss mae --use_layer_norm

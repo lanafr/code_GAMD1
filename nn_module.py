@@ -101,8 +101,8 @@ class SmoothConvLayerNew(nn.Module):
                  out_node_feats,
                  hidden_dim=128,
                  activation='relu',
-                 drop_edge=True,
-                 #drop_edge=False,
+                 #drop_edge=True,
+                 drop_edge=False,
                  update_edge_emb=False):
 
         super(SmoothConvLayerNew, self).__init__()
@@ -173,10 +173,10 @@ class SmoothConvBlockNew(nn.Module):
                  in_node_feats,
                  out_node_feats,
                  hidden_dim=128,
-                 conv_layer=3,
+                 conv_layer=2,  # at some point try with 3
                  edge_emb_dim=64,
                  use_layer_norm=False,
-                 use_batch_norm=True,
+                 use_batch_norm=False, ##changed it
                  drop_edge=False,
                  activation='relu',
                  update_egde_emb=False,
@@ -213,13 +213,13 @@ class SmoothConvBlockNew(nn.Module):
             if use_layer_norm:
                 self.norm_layers.append(nn.LayerNorm(out_node_feats))
             elif use_batch_norm:
-                self.norm_layers.append(nn.BatchNorm1d(out_node_feats))
+                self.norm_layers.append(nn.BatchNorm1d(out_node_feats)) 
 
     def forward(self, h: torch.Tensor, graph: dgl.DGLGraph) -> torch.Tensor:
 
         for l, conv_layer in enumerate(self.conv):
             if self.use_layer_norm or self.use_batch_norm:
-                h = conv_layer.forward(graph, self.norm_layers[l](h)) + h
+                #h = conv_layer.forward(graph, self.norm_layers[l](h)) + h ## I changed ittttt
             else:
                 h = conv_layer.forward(graph, h) + h
 
@@ -324,6 +324,7 @@ class SimpleMDNetNew(nn.Module):  # no bond, no learnable node encoder
                                 activation='gelu')
         self.edge_layer_norm = nn.LayerNorm(self.edge_emb_dim)
         self.graph_decoder = MLP(encoding_size, out_feats, hidden_layer=2, hidden_dim=hidden_dim, activation='gelu')
+        self.save_index = 0
 
 
 
@@ -412,14 +413,157 @@ class SimpleMDNetNew(nn.Module):  # no bond, no learnable node encoder
         
         x=self.graph_conv(fluid_graph.ndata['e'],fluid_graph)
 
-        folder_path = "LJ/graphs_to_train"
+        folder_path = "graphs_to_train"
         os.makedirs(folder_path, exist_ok=True)
 
-        lol = random.uniform(0, 100000)
-
-        graph_filename = os.path.join(folder_path, f"graph{lol}.dgl")
+        graph_filename = os.path.join(folder_path, f"graph{self.save_index}.dgl")
+        self.save_index += 1
         dgl.save_graphs(graph_filename, fluid_graph)
 
         x = self.graph_decoder(x)
         
         return x
+
+class GNNAutoencoder(nn.Module):
+    def __init__(self,
+                 encoding_size,
+                 out_feats,
+                 box_size,   # can also be array
+                 hidden_dim=128,
+                 conv_layer=2,
+                 edge_embedding_dim=1,
+                 dropout=0.1,
+                 drop_edge=True,
+                 use_layer_norm=False):
+        super(GNNAutoencoder, self).__init__()
+        self.graph_conv1 = SmoothConvBlockNew(in_node_feats=encoding_size,
+                                             out_node_feats=64,
+                                             hidden_dim=hidden_dim,
+                                             conv_layer=conv_layer,
+                                             edge_emb_dim=1,
+                                             use_layer_norm=use_layer_norm,
+                                             use_batch_norm=not use_layer_norm,
+                                             drop_edge=drop_edge,
+                                             activation='silu')
+        self.graph_conv2 = SmoothConvBlockNew(in_node_feats=64,
+                                             out_node_feats=encoding_size,
+                                             hidden_dim=hidden_dim,
+                                             conv_layer=conv_layer,
+                                             edge_emb_dim=edge_embedding_dim,
+                                             use_layer_norm=use_layer_norm,
+                                             use_batch_norm=not use_layer_norm,
+                                             drop_edge=drop_edge,
+                                             activation='silu')
+
+        self.edge_emb_dim = edge_embedding_dim
+        self.edge_expand = RBFExpansion(high=1, gap=0.025)
+        self.edge_drop_out = nn.Dropout(dropout)
+
+        self.length_mean = nn.Parameter(torch.tensor([0.]), requires_grad=False)
+        self.length_std = nn.Parameter(torch.tensor([1.]), requires_grad=False)
+        self.length_scaler = StandardScaler()
+
+        if isinstance(box_size, np.ndarray):
+            self.box_size = torch.from_numpy(box_size).float()
+        else:
+            self.box_size = box_size
+        self.box_size = self.box_size
+
+        self.node_encoder = MLP(3, encoding_size, hidden_layer=2, hidden_dim=hidden_dim, activation='gelu')
+        #self.edge_encoder = MLP(3 + 1 + len(self.edge_expand.centers), self.edge_emb_dim, hidden_dim=hidden_dim,
+                                #activation='gelu')
+        #self.edge_layer_norm = nn.LayerNorm(self.edge_emb_dim)
+        self.graph_decoder = MLP(encoding_size, out_feats, hidden_layer=2, hidden_dim=hidden_dim, activation='gelu')
+
+
+
+    def calc_edge_feat(self,
+                       src_idx: torch.Tensor,
+                       dst_idx: torch.Tensor,
+                       pos_src: torch.Tensor,
+                       pos_dst=None) -> torch.Tensor:
+        # this is the raw input feature
+
+        # to enhance computation performance, dont track their calculation on graph
+        if pos_dst is None:
+            pos_dst = pos_src
+
+        with torch.no_grad():
+            rel_pos = pos_dst[dst_idx.long()] - pos_src[src_idx.long()]
+            if isinstance(self.box_size, torch.Tensor):
+                rel_pos_periodic = torch.remainder(rel_pos + 0.5 * self.box_size.to(rel_pos.device),
+                                                   self.box_size.to(rel_pos.device)) - 0.5 * self.box_size.to(rel_pos.device)
+            else:
+                rel_pos_periodic = torch.remainder(rel_pos + 0.5 * self.box_size,
+                                                   self.box_size) - 0.5 * self.box_size
+
+            rel_pos_norm = rel_pos_periodic.norm(dim=1).view(-1, 1)  # [edge_num, 1]
+            rel_pos_periodic /= rel_pos_norm + 1e-8   # normalized
+
+        if self.training:
+            self.fit_length(rel_pos_norm)
+            self._update_length_stat(self.length_scaler.mean_, np.sqrt(self.length_scaler.var_))
+
+        rel_pos_norm = (rel_pos_norm - self.length_mean) / self.length_std
+        edge_feat = torch.cat((rel_pos_periodic,
+                               rel_pos_norm,
+                               self.edge_expand(rel_pos_norm)), dim=1)
+        return edge_feat
+
+    def build_graph(self,
+                    fluid_edge_idx: torch.Tensor,
+                    fluid_pos: torch.Tensor,
+                    self_loop=True) -> dgl.DGLGraph:
+
+        center_idx = fluid_edge_idx[0, :]  # [edge_num, 1]
+        neigh_idx = fluid_edge_idx[1, :]
+        fluid_graph = dgl.graph((neigh_idx, center_idx))
+        fluid_edge_feat = self.calc_edge_feat(center_idx, neigh_idx, fluid_pos)
+        """
+        fluid_edge_emb = self.edge_layer_norm(self.edge_encoder(fluid_edge_feat))  # [edge_num, 64]
+        fluid_edge_emb = self.edge_drop_out(fluid_edge_emb)
+        fluid_graph.edata['e'] = fluid_edge_emb
+        """
+        fluid_graph.edata['e'] = 1
+
+        #add node embeddings
+        fluid_graph.ndata['e'] = self.node_encoder(fluid_pos)
+
+        # add self loop for fluid particles
+        if self_loop:
+            fluid_graph.add_self_loop()
+        return fluid_graph
+
+    def build_graph_batches(self, pos_lst, edge_idx_lst):
+        graph_lst = []
+        for pos, edge_idx in zip(pos_lst, edge_idx_lst):
+            graph = self.build_graph(edge_idx, pos)
+            graph_lst += [graph]
+        batched_graph = dgl.batch(graph_lst)
+        return batched_graph
+
+    def _update_length_stat(self, new_mean, new_std):
+        self.length_mean[0] = new_mean[0]
+        self.length_std[0] = new_std[0]
+
+    def fit_length(self, length):
+        if not isinstance(length, np.ndarray):
+            length = length.detach().cpu().numpy().reshape(-1, 1)
+        self.length_scaler.partial_fit(length)
+
+    def gencoder(self, h: torch.Tensor, g: dgl.DGLGraph) -> dgl.DGLGraph:
+        x = self.graph_conv1(h, g)
+        return x
+        # make a new graph based on x
+
+    def gdecoder(self, h: torch.Tensor, g: dgl.DGLGraph) -> dgl.DGLGraph:
+        x = self.graph_conv2(h, g)
+        return x
+    
+    
+    def forward(self, g: dgl.DGLGraph) -> dgl.DGLGraph:
+        
+        g_embed = self.gencoder(g.ndata['e'], g)
+        g = self.gdecoder(g_ebed.ndata['e'], g_embed)
+        
+        return g

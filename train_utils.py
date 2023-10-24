@@ -2,6 +2,7 @@ import torch
 import os
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
+import dgl
 
 class LJDataNew(Dataset):
     def __init__(self,
@@ -84,3 +85,42 @@ class LJDataNew(Dataset):
             return data, data_path
 
         return data
+
+class Graphs_data(Dataset):
+    def __init__(self,
+                 dataset_path,
+                 sample_num,   # per seed
+                 case_prefix='graphs_to_train',
+                 split=(0.9, 0.1),
+                 mode='train',
+                 ddp_seed=None,
+                 ):
+        self.dataset_path = dataset_path
+        self.sample_num = sample_num
+        self.case_prefix = case_prefix
+        self.ddp_seed = ddp_seed
+        self.mode = mode
+
+        idxs = [i for i in range(sample_num)]
+        assert mode in ['train', 'test']
+        #np.random.seed(0)   # fix same random seed: Setting a random seed ensures that the random shuffling of idxs will be the same every time you run your code, making your results reproducible.
+        np.random.shuffle(idxs)
+        ratio = split[0]
+        if mode == 'train':
+            self.idx = idxs[:int(len(idxs)*ratio)]
+        else:
+            self.idx = idxs[int(len(idxs)*ratio):]
+
+    def __len__(self):
+        return len(self.idx)
+
+    def __getitem__(self, idx, get_path_name=False):
+        sample_to_read = self.idx[idx]
+
+        fname = f'graph{idx}.dgl'
+
+        data_path = os.path.join(self.dataset_path, fname)
+        
+        graph = dgl.load_graphs(data_path)
+
+        return graph

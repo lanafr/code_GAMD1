@@ -44,18 +44,14 @@ class LJDataSequence(Dataset):
 
         self.mode = mode
         assert mode in ['train', 'test']
-        idxs = np.arange(seed_num*sample_num)
-        #np.random.seed(0)   # fix same random seed: Setting a random seed ensures that the random shuffling of idxs will be the same every time you run your code, making your results reproducible.
-        np.random.shuffle(idxs)
-        ratio = split[0]
         if mode == 'train':
-            self.idx = idxs[:int(len(idxs)*ratio)]
+            self.seed = [0:8]
         else:
-            self.idx = idxs[int(len(idxs)*ratio):]
+            self.seed = [9]
 
     def __len__(self):
-        return len(self.idx)
-
+        return 999
+ """
 
     def __getitem__(self, idx, get_path_name=False):
         idx = self.idx[idx]
@@ -89,8 +85,10 @@ class LJDataSequence(Dataset):
             return data, data_path
 
         return data
+
+    """
     
-    def __getsequence__(self, seed, get_path_name=False):
+    def __getitem__(self, seed, get_path_name=False):
         sample_num = self.sample_num
 
         sequence = []
