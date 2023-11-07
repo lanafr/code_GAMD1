@@ -9,7 +9,7 @@ print(sys.path)
 
 from nn_module import SimpleMDNetNew
 from train_utils import LJDataNew
-from train_network_lj import ParticleNetLightning, NUM_OF_ATOMS
+from train_endtoend_autoencoder_nice import ParticleNetLightning, NUM_OF_ATOMS
 import torch
 import numpy as np
 from torch.utils.data import DataLoader
@@ -30,12 +30,12 @@ dataloader = DataLoader(dataset, num_workers=2, batch_size=1, shuffle=False,
                               'pos_next': [batch['pos_next'] for batch in batches],
                           })
 
-PATH = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/autoencoder_try5_batch16_and_drop_edge_false/checkpoint_29.ckpt'
-SCALER_CKPT = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/autoencoder_try5_batch16_and_drop_edge_false/scaler_29.npz'
+PATH = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/autoencoder_for_graphs_withpos_and_no_reg_just_rec_loss/checkpoint_29.ckpt'
+SCALER_CKPT = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/autoencoder_for_graphs_withpos_and_no_reg_just_rec_loss/scaler_29.npz'
 args = SimpleNamespace(use_layer_norm=False,
-                       encoding_size=128,
-                       hidden_dim=256,
-                       edge_embedding_dim=256,
+                       encoding_size=256,
+                       hidden_dim=128,
+                       edge_embedding_dim=1,
                       drop_edge=False,
                        conv_layer=4,
                       rotate_aug=False,
@@ -109,22 +109,38 @@ for i in range(1000):
 #this part is to check how well the autoencoder works on a test set
 pos_lst=[]
 gt_lst=[]
-
+"""
 for i in range(999):
 
     gt_all = np.load(f'md_dataset/lj_data_to_test/data_0_{i}.npz')
     gt = gt_all['pos']
     gt_lst.append(gt)
 
-    pos_hopefully_same = model.predict_nextpos(gt)
+    (pos_hopefully_same, graph1, graph2) = model.predict_nextpos(gt)
     pos_lst.append(pos_hopefully_same)
-
+"""
+gt_all = np.load(f'md_dataset/lj_data/data_3_785.npz')
+gt = gt_all['pos']
+pos_hopefully_same, graph1, graph2 = model.predict_nextpos(gt)
+"""
 gt_lst = [torch.from_numpy(arr) for arr in gt_lst]
 gt_cat = torch.cat(gt_lst, dim=0)
 pos_lst = [torch.from_numpy(arr) for arr in pos_lst]
 pos_cat = torch.cat(pos_lst, dim=0)
-
-mae = nn.L1Loss()(pos_cat, gt_cat)
+"""
+mae = nn.L1Loss()(torch.tensor(pos_hopefully_same), torch.tensor(gt))
 
 print("Loss is:")
 print(mae)
+
+print("Pos original:")
+print(gt)
+print("Pos predicted:")
+print(pos_hopefully_same)
+print("Difference")
+print(gt-pos_hopefully_same)
+
+print("Graph original:")
+print(graph1)
+print("Graph other:")
+print(graph2)

@@ -4,6 +4,7 @@ from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import dgl
 
+
 class LJDataNew(Dataset):
     def __init__(self,
                  dataset_path,
@@ -63,8 +64,8 @@ class LJDataNew(Dataset):
         fname = f'data_{seed}_{sample_to_read}'#f'seed_{seed_to_read}_data_{sample_to_read}'
         fname_next = f'data_{seed}_{sample_to_read_next}'
 
-        #fname = f'data_4_555'
-        #fname_next = f'data_4_555'
+        #fname = f'data_6_367'
+        #fname_next = f'data_4_368'
 
         data_path = os.path.join(self.dataset_path, fname)
         data_path_next = os.path.join(self.dataset_path, fname_next)
@@ -87,19 +88,8 @@ class LJDataNew(Dataset):
         return data
 
 class Graphs_data(Dataset):
-    def __init__(self,
-                 dataset_path,
-                 sample_num,   # per seed
-                 case_prefix='graphs_to_train',
-                 split=(0.9, 0.1),
-                 mode='train',
-                 ddp_seed=None,
-                 ):
-        self.dataset_path = dataset_path
+    def __init__(self, sample_num):
         self.sample_num = sample_num
-        self.case_prefix = case_prefix
-        self.ddp_seed = ddp_seed
-        self.mode = mode
 
         idxs = [i for i in range(sample_num)]
         assert mode in ['train', 'test']
@@ -117,7 +107,8 @@ class Graphs_data(Dataset):
     def __getitem__(self, idx, get_path_name=False):
         sample_to_read = self.idx[idx]
 
-        fname = f'graph{idx}.dgl'
+        #fname = f'graph{idx}.dgl'
+        fname = 'graph3498.dgl'
 
         data_path = os.path.join(self.dataset_path, fname)
         

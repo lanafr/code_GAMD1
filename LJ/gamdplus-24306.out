@@ -1,3 +1,0 @@
-Using following set of hyper-parameters
-{'encoding_size': 128, 'out_feats': 3, 'hidden_dim': 256, 'edge_embedding_dim': 1, 'conv_layer': 4, 'drop_edge': False, 'use_layer_norm': False, 'box_size': 27.27}
-Validation sanity check: 0it [00:00, ?it/s]Validation sanity check:   0%|          | 0/2 [00:00<?, ?it/s]

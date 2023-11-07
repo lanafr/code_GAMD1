@@ -96,13 +96,13 @@ class AutoencoderNetLightning(pl.LightningModule):
             self.training_var = scaler_info['var']
 
     
-    def do_the_autoencoding(self, g:dgl.DGLGraph) -> dgl.DGLGraph:
+    def do_the_autoencoding(self, g:dgl.DGLGraph, verbose=False) -> dgl.DGLGraph:
         nbr_start = time.time()
         nbr_end = time.time()
 
-        graph_old = g.to('cuda')
+        g = g.to('cuda')
         force_start = time.time()
-        graph_new = self.pnet_model(graph_old
+        graph_new = self.pnet_model(g
                                )
         force_end = time.time()
         if verbose:
@@ -110,21 +110,21 @@ class AutoencoderNetLightning(pl.LightningModule):
             print(f'Nbr search used time: {nbr_end - nbr_start}')
             print(f'Next pos prediction used time: {force_end - force_start}')
 
-        graph_new = graph_new.detach().cpu().numpy()
+        graph_new = graph_new.to('cpu')
+        g = g.to('cpu')
 
         return graph_new
 
-    def training_step(self, batch):
-        
+    def training_step(self, batch, dummy1):
+        """
         old_graph = batch[0][0]
-        print(type(batch))
-        print(type(old_graph))
+        gt = old_graph.ndata['e']
 
         new_graph = self.do_the_autoencoding(old_graph
-                               )
+                                )
 
         pred = new_graph.ndata['e']
-        gt = old_graph.ndata['e']
+        gt = gt.to('cpu')
 
         if self.loss_fn == 'mae':
             loss = nn.L1Loss()(pred, gt)
@@ -140,10 +140,44 @@ class AutoencoderNetLightning(pl.LightningModule):
         self.log(f'{self.loss_fn} loss', first_loss, on_step=True, prog_bar=True, logger=True)
 
         return loss
+        """
+        total_loss = 0.0
+        total_first_loss = 0.0
+
+        for old_graph in batch[0]:
+            print(type(old_graph))
+            gt = old_graph.ndata['e']
+
+            new_graph = self.do_the_autoencoding(old_graph)
+
+            pred = new_graph.ndata['e']
+            gt = gt.to('cpu')
+
+            if self.loss_fn == 'mae':
+                loss = nn.L1Loss()(pred, gt)
+            else:
+                loss = nn.MSELoss()(pred, gt)
+
+            #first_loss = loss
+
+            #conservative_loss = (torch.mean(pred)).abs()
+            #loss = loss + LAMBDA2 * conservative_loss
+
+            total_loss += loss
+            #total_first_loss += first_loss
+
+        # Calculate the mean loss over the batch
+        mean_loss = total_loss / len(batch[0])
+        #mean_first_loss = total_first_loss / len(batch)
+
+        self.log('total loss', mean_loss, on_step=True, prog_bar=True, logger=True)
+        #self.log(f'{self.loss_fn} loss', mean_first_loss, on_step=True, prog_bar=True, logger=True)
+
+        return mean_loss
 
     def configure_optimizers(self):
         optim = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
-        sched = StepLR(optim, step_size=5, gamma=0.001**(5/self.epoch_num))
+        sched = StepLR(optim, step_size=5, gamma=000.1**(5/self.epoch_num)) ## I added the 2
         return [optim], [sched]
 
     def collate_dgl_graphs(batch):
@@ -154,42 +188,77 @@ class AutoencoderNetLightning(pl.LightningModule):
 
     def train_dataloader(self):
         dataset = Graphs_data(dataset_path=os.path.join(self.data_dir),
-                               sample_num=9055, #this I changed
+                               sample_num=10000, #this I changed
                                case_prefix='graphs_to_train',
                                mode='train')
 
         #return DataLoader(dataset,num_workers=2, batch_size=1, shuffle=False, collate_fn=self.collate_dgl_graphs)
         distributed_sampler = DistributedSampler(dataset, seed=0)
-        return dgl.dataloading.GraphDataLoader(dataset, batch_size=1, shuffle=False, drop_last=False, num_workers=2, sampler=distributed_sampler)
+        return dgl.dataloading.GraphDataLoader(dataset, batch_size=4, shuffle=False, drop_last=True, num_workers=2, sampler=distributed_sampler)
 
     def val_dataloader(self):
         dataset = Graphs_data(dataset_path=os.path.join(self.data_dir),
-                               sample_num=9055, #this I changed
+                               sample_num=10000, #this I changed
                                case_prefix='graphs_to_train',
                                mode='test')
 
         #return DataLoader(dataset,num_workers=2, batch_size=1, shuffle=False, collate_fn=self.collate_dgl_graphs)
         distributed_sampler = DistributedSampler(dataset, seed=0)
-        return dgl.dataloading.GraphDataLoader(dataset, batch_size=1, shuffle=False, drop_last=False, num_workers=2, sampler=distributed_sampler)
+        return dgl.dataloading.GraphDataLoader(dataset, batch_size=4, shuffle=False, drop_last=True, num_workers=2, sampler=distributed_sampler)
 
 
     def validation_step(self, batch, batch_nb):
         with torch.no_grad():
 
+            """
             old_graph = batch[0][0]
+            gt = old_graph.ndata['e']
 
             new_graph = self.do_the_autoencoding(old_graph
                                )
 
             pred = new_graph.ndata['e']
-            gt = old_graph.ndata['e']
+            gt = gt.to('cpu')
 
             mse = nn.MSELoss()(pred, gt)
             mae = nn.L1Loss()(pred, gt)
 
-            self.log('val outlier', outlier_ratio, prog_bar=True, logger=True)
+            #self.log('val outlier', outlier_ratio, prog_bar=True, logger=True)
             self.log('val mse', mse, prog_bar=True, logger=True)
             self.log('val mae', mae, prog_bar=True, logger=True)
+        """
+            total_loss = 0.0
+            total_first_loss = 0.0
+
+            for old_graph in batch[0]:
+                gt = old_graph.ndata['e']
+
+                new_graph = self.do_the_autoencoding(old_graph)
+
+                pred = new_graph.ndata['e']
+                gt = gt.to('cpu')
+
+                if self.loss_fn == 'mae':
+                    loss = nn.L1Loss()(pred, gt)
+                else:
+                    loss = nn.MSELoss()(pred, gt)
+
+                #first_loss = loss
+
+                #conservative_loss = (torch.mean(pred)).abs()
+                #loss = loss + LAMBDA2 * conservative_loss
+
+                total_loss += loss
+                #total_first_loss += first_loss
+
+            # Calculate the mean loss over the batch
+            mean_loss = total_loss / len(batch[0])
+            #mean_first_loss = total_first_loss / len(batch)
+
+            self.log('total validation loss', mean_loss, on_step=True, prog_bar=True, logger=True)
+            #self.log(f'{self.loss_fn} loss', mean_first_loss, on_step=True, prog_bar=True, logger=True)
+
+            return mean_loss
 
 
 class ModelCheckpointAtEpochEnd(pl.Callback):
@@ -270,8 +339,8 @@ def main():
     parser.add_argument('--cp_dir', default='./model_ckpt_autoencoder/autoencoder_for_graphs1')
     parser.add_argument('--state_ckpt_dir', default=None, type=str)
     parser.add_argument('--batch_size', default=1, type=int)
-    parser.add_argument('--encoding_size', default=128, type=int)
-    parser.add_argument('--hidden_dim', default=256, type=int)
+    parser.add_argument('--encoding_size', default=256, type=int)
+    parser.add_argument('--hidden_dim', default=128, type=int)
     parser.add_argument('--edge_embedding_dim', default=1, type=int)
     parser.add_argument('--drop_edge', action='store_true')
     parser.add_argument('--use_layer_norm', action='store_true')

@@ -37,37 +37,6 @@ NUM_OF_ATOMS = 258
 LAMBDA1 = 100.
 LAMBDA2 = 1e-3
 
-
-def get_rotation_matrix():
-    """ Randomly rotate the point clouds to augument the dataset
-        rotation is per shape based along up direction
-        Input:
-          Nx3 array, original point clouds
-        Return:
-          Nx3 array, rotated point clouds
-    """
-    if np.random.uniform() < 0.3:
-        angles = np.random.randint(-2, 2, size=(3,)) * np.pi
-    else:
-        angles = [0., 0., 0.]
-    Rx = np.array([[1., 0, 0],
-                       [0, np.cos(angles[0]), -np.sin(angles[0])],
-                       [0, np.sin(angles[0]), np.cos(angles[0])]], dtype=np.float32)
-    Ry = np.array([[np.cos(angles[1]), 0, np.sin(angles[1])],
-                       [0, 1, 0],
-                       [-np.sin(angles[1]), 0, np.cos(angles[1])]], dtype=np.float32)
-    Rz = np.array([[np.cos(angles[2]), -np.sin(angles[2]), 0],
-                   [np.sin(angles[2]), np.cos(angles[2]), 0],
-                   [0, 0, 1]], dtype=np.float32)
-    rotation_matrix = np.matmul(Rz, np.matmul(Ry, Rx))
-
-    return rotation_matrix
-
-
-def center_positions(pos):
-    offset = np.mean(pos, axis=0)
-    return pos - offset, offset
-
 def build_model(args, ckpt=None):
 
     param_dict = {
@@ -125,20 +94,6 @@ class ParticleNetLightning(pl.LightningModule):
             self.training_mean = scaler_info['mean']
             self.training_var = scaler_info['var']
 
-    """
-    
-    def forward(self, pos, feat, edge_idx_tsr):
-        return self.denormalize(self.pnet_model(pos, feat, edge_idx_tsr.long()), self.training_var, self.training_mean)
-
-    
-
-    def denormalize(self, normalized_force, var, mean):
-        return normalized_force * \
-                np.sqrt(var) +\
-                mean
-
-    """
-
     
     def predict_nextpos(self, pos: np.ndarray, verbose=False):
         nbr_start = time.time()
@@ -151,7 +106,7 @@ class ParticleNetLightning(pl.LightningModule):
         pos = np.mod(pos, np.array(BOX_SIZE))
         pos = torch.from_numpy(pos).float().cuda()
         force_start = time.time()
-        pred = self.pnet_model([pos],
+        pred, graphem1, graphem2, emb = self.pnet_model([pos],
                                [edge_idx_tsr],
                                )
         force_end = time.time()
@@ -162,23 +117,7 @@ class ParticleNetLightning(pl.LightningModule):
 
         pred = pred.detach().cpu().numpy()
 
-        #pred = self.denormalize(pred, self.training_var, self.training_mean)
-
-        return pred
-
-    
-
-    """
-
-    def scale_force(self, force, scaler):
-        b_pnum, dims = force.shape
-        force_flat = force.reshape((-1, 1))
-        scaler.partial_fit(force_flat)
-        force = torch.from_numpy(scaler.transform(force_flat)).float().view(b_pnum, dims)
-        return force
-    """
-
-
+        return pred, graphem1, graphem2, emb
     
 
     def get_edge_idx(self, nbrs, pos_jax, mask):
@@ -219,7 +158,6 @@ class ParticleNetLightning(pl.LightningModule):
 
     def training_step(self, batch, batch_nb):
         pos_lst = batch['pos']
-        #gt_lst = batch['forces']
         #gt_lst=batch['pos_next']
         gt_lst = batch ['pos']
         edge_idx_lst = []
@@ -227,24 +165,12 @@ class ParticleNetLightning(pl.LightningModule):
         for b in range(len(gt_lst)):
             pos, gt = pos_lst[b], gt_lst[b]
 
-            if self.rotate_aug: #I should probably do it without this as it makes it harder to track molecules over time and also could mess up jump functions in the future
-                pos = np.mod(pos, BOX_SIZE)
-                pos, off = center_positions(pos)
-                R = get_rotation_matrix()
-                pos = np.matmul(pos, R)
-                pos += off
-                gt = np.matmul(gt, R)
-                gt += off #this I added bc gt is no longer forces but coordinates which are not centred as forces
-
             pos = np.mod(pos, BOX_SIZE) #also this should trivially be true if the simulations are correct
             gt = np.mod(gt, BOX_SIZE) #this I added
 
-            #gt = self.scale_force(gt, self.train_data_scaler).cuda()
-            #gt = gt.cuda() # this I added bc gt are no longer forces but coordinated which do not need to be scaled
-
+            
             pos_lst[b] = torch.from_numpy(pos).float().cuda()
             gt_lst[b] = torch.from_numpy(gt).float().cuda() #this I added
-            #gt_lst[b] = gt
 
             edge_idx_tsr = self.search_for_neighbor(pos,
                                                     self.nbr_searcher,
@@ -257,30 +183,30 @@ class ParticleNetLightning(pl.LightningModule):
         #pred = self.pnet_model(pos_lst,
         #                       edge_idx_lst,
         #                       )
-        pred, graph1, graph2 = self.pnet_model(pos_lst,
+        pred, graphem1, graphem2, emb = self.pnet_model(pos_lst,
                                    edge_idx_lst,
                                    )
 
         if self.loss_fn == 'mae':
-            loss = nn.L1Loss()(pred, gt)
-            rec_loss = nn.L1Loss()(graph1.ndata['e'], graph2.ndata['e'])
+            cord_loss = nn.L1Loss()(pred, gt)
+            rec_loss = nn.L1Loss()(graphem1, graphem2)
         else:
-            loss = nn.MSELoss()(pred, gt)
-            rec_loss = nn.MSELoss()(graph1.ndata['e'], graph2.ndata['e'])
+            cord_loss = nn.MSELoss()(pred, gt)
+            rec_loss = nn.MSELoss()(graphem1, graphem2)
 
-        first_loss = loss+rec_loss
+        regularization_loss = (torch.mean(graphem1)).abs()
+
+        loss = cord_loss + 0.5*rec_loss #+ 0.5/regularization_loss
 
         conservative_loss = (torch.mean(pred)).abs() #conservative loss penalizes size of the predictions (remove it, leave it?)
-        loss = loss + LAMBDA2 * conservative_loss
+        loss_with_added = loss + LAMBDA2 * conservative_loss
 
-        #self.training_mean = self.train_data_scaler.mean_
-        #self.training_var = self.train_data_scaler.var_
+        self.log('cord_loss', cord_loss, on_step=True, prog_bar=True, logger=True)
+        self.log(f'actual loss:{self.loss_fn}', loss, on_step=True, prog_bar=True, logger=True)
+        self.log('graph rec loss', rec_loss, on_step=True, prog_bar=True, logger=True)
 
-        self.log('total loss', loss, on_step=True, prog_bar=True, logger=True)
-        self.log(f'{self.loss_fn} loss', first_loss, on_step=True, prog_bar=True, logger=True)
-        #self.log('var', np.sqrt(self.training_var), on_step=True, prog_bar=True, logger=True)
 
-        return first_loss
+        return loss
 
     def configure_optimizers(self):
         optim = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
@@ -303,24 +229,6 @@ class ParticleNetLightning(pl.LightningModule):
                               'forces_next': [batch['forces_next'] for batch in batches], #this I changed
                           })
 
-    """
-
-    def val_dataloader(self):
-        dataset = LJDataNew(dataset_path=os.path.join(self.data_dir, 'lj_data'),
-                               sample_num=1000,
-                               case_prefix='data_',
-                               seed_num=10,
-                               mode='test')
-
-        return DataLoader(dataset, num_workers=2, batch_size=16, shuffle=False,
-                          collate_fn=
-                          lambda batches: {
-                              'pos': [batch['pos'] for batch in batches],
-                              'forces': [batch['forces'] for batch in batches],
-                          })
-
-    """
-
     def val_dataloader(self):
         dataset = LJDataNew(dataset_path=os.path.join(self.data_dir, 'lj_data'),
                                sample_num=999, #this I changed
@@ -337,42 +245,6 @@ class ParticleNetLightning(pl.LightningModule):
                               'forces_next': [batch['forces_next'] for batch in batches],
                           })
 
-    """
-
-    def validation_step(self, batch, batch_nb):
-        with torch.no_grad():
-
-            pos_lst = batch['pos']
-            gt_lst = batch['forces']
-            edge_idx_lst = []
-            for b in range(len(gt_lst)):
-                pos, gt = pos_lst[b], gt_lst[b]
-                pos = np.mod(pos, BOX_SIZE)
-
-                gt = self.scale_force(gt, self.train_data_scaler).cuda()
-                pos_lst[b] = torch.from_numpy(pos).float().cuda()
-                gt_lst[b] = gt
-
-                edge_idx_tsr = self.search_for_neighbor(pos,
-                                                        self.nbr_searcher,
-                                                        self.nbrlst_to_edge_mask,
-                                                        'all')
-                edge_idx_lst += [edge_idx_tsr]
-            gt = torch.cat(gt_lst, dim=0)
-
-            pred = self.pnet_model(pos_lst,
-                                   edge_idx_lst,
-                                   )
-            ratio = torch.sqrt((pred.reshape(-1) - gt.reshape(-1)) ** 2) / (torch.abs(pred.reshape(-1)) + 1e-8)
-            outlier_ratio = ratio[ratio > 10.].shape[0] / ratio.shape[0]
-            mse = nn.MSELoss()(pred, gt)
-            mae = nn.L1Loss()(pred, gt)
-
-            self.log('val outlier', outlier_ratio, prog_bar=True, logger=True)
-            self.log('val mse', mse, prog_bar=True, logger=True)
-            self.log('val mae', mae, prog_bar=True, logger=True)
-
-    """
 
     def validation_step(self, batch, batch_nb):
         with torch.no_grad():
@@ -398,20 +270,13 @@ class ParticleNetLightning(pl.LightningModule):
                 edge_idx_lst += [edge_idx_tsr]
             gt = torch.cat(gt_lst, dim=0)
 
-            pred, graph1, graph2 = self.pnet_model(pos_lst,
-                                   edge_idx_lst,
-                                   )
+            pred, graphem1, graphem2, emb = self.pnet_model(pos_lst, edge_idx_lst)
 
-            
-
-            #ratio = torch.sqrt((pred.reshape(-1) - gt.reshape(-1)) ** 2) / (torch.abs(pred.reshape(-1)) + 1e-8)
-            #outlier_ratio = ratio[ratio > 10.].shape[0] / ratio.shape[0]
             mse = nn.MSELoss()(pred, gt)
-            mse_for_graphs = nn.MSELoss()(graph1.ndata['e'], graph2.ndata['e'])
+            mse_for_graphs = nn.MSELoss()(graphem1, graphem2)
             mae = nn.L1Loss()(pred, gt)
-            mae_for_graphs = nn.L1Loss()(graph1.ndata['e'], graph2.ndata['e'])
+            mae_for_graphs = nn.L1Loss()(graphem1, graphem2)
 
-            #self.log('val outlier', outlier_ratio, prog_bar=True, logger=True)
             self.log('val mse for coordinates', mse, prog_bar=True, logger=True)
             self.log('val mae for coordinates', mae, prog_bar=True, logger=True)
             self.log('val mae for graphs', mae_for_graphs, prog_bar=True, logger=True)
@@ -493,7 +358,7 @@ def main():
     parser.add_argument('--min_epoch', default=30, type=int)
     parser.add_argument('--max_epoch', default=30, type=int)
     parser.add_argument('--lr', default=3e-4, type=float)
-    parser.add_argument('--cp_dir', default='./model_ckpt/autoencoder_for_graphs_withpos')
+    parser.add_argument('--cp_dir', default='./model_ckpt/autoencoder_for_graphs_withpos_and_no_reg_just_rec_loss')
     parser.add_argument('--state_ckpt_dir', default=None, type=str)
     parser.add_argument('--batch_size', default=4, type=int)
     parser.add_argument('--encoding_size', default=256, type=int)
@@ -503,7 +368,7 @@ def main():
     parser.add_argument('--use_layer_norm', action='store_true')
     parser.add_argument('--disable_rotate_aug', dest='rotate_aug', default=True, action='store_false')
     parser.add_argument('--data_dir', default='./md_dataset')
-    parser.add_argument('--loss', default='mae')
+    parser.add_argument('--loss', default='mse')
     parser.add_argument('--num_gpu', default=-1, type=int)
     args = parser.parse_args()
     train_model(args)
