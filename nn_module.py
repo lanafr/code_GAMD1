@@ -20,6 +20,8 @@ from torchdyn import *
 from torchdyn.models import *
 from torchdyn.nn import *
 
+from dgl.nn import NNConv
+
 
 def cubic_kernel(r, re):
     eps = 1e-3
@@ -323,27 +325,37 @@ class SimpleMDNetNew(nn.Module):  # no bond, no learnable node encoder
             self.box_size = box_size
         self.box_size = self.box_size
 
-        self.node_encoder = MLP(3, encoding_size, hidden_layer=4, hidden_dim=hidden_dim, activation='leaky_relu')
-        self.node_dencoder = MLP(encoding_size, 3, hidden_layer=4, hidden_dim=hidden_dim, activation='leaky_relu')
+        self.node_encoder = MLP(3, 128, hidden_layer=4, hidden_dim=hidden_dim, activation='leaky_relu')
+        self.node_dencoder = MLP(128, 3, hidden_layer=4, hidden_dim=hidden_dim, activation='leaky_relu')
         #self.edge_encoder = MLP(3 + 1 + len(self.edge_expand.centers), self.edge_emb_dim, hidden_dim=hidden_dim,
         #                        activation='gelu')
         #self.edge_layer_norm = nn.LayerNorm(self.edge_emb_dim)
         #self.graph_decoder = MLP(encoding_size, out_feats, hidden_layer=2, hidden_dim=hidden_dim, activation='gelu')
         self.save_index = 0
 
-
-        #embedding_size
+        """
+        #with GraphConv
         
-        self.graph_conv1 = GraphConv(encoding_size, hidden_dim, norm='both', weight=True, bias=True)#, activation = nn.SiLU())
-        self.graph_conv2 = GraphConv(hidden_dim, encoding_size, norm='both', weight=True, bias=True)#, activation = nn.Sigmoid())
-        self.graph_conv_hid1 = GraphConv(hidden_dim, hidden_dim, norm='both', weight=True, bias=True, activation = nn.Tanh())
-        self.graph_conv_hid2 = GraphConv(hidden_dim, hidden_dim, norm='both', weight=True, bias=True, activation = nn.Tanh())
+        self.graph_e_1 = GraphConv(128, hidden_dim, norm='both', weight=True, bias=True)#, activation = nn.SiLU())
+        self.graph_d_1 = GraphConv(hidden_dim, 128, norm='both', weight=True, bias=True)#, activation = nn.Sigmoid())
+        self.graph_e_2 = GraphConv(hidden_dim, hidden_dim, norm='both', weight=True, bias=True, activation = nn.Tanh())
+        self.graph_d_2 = GraphConv(hidden_dim, hidden_dim, norm='both', weight=True, bias=True, activation = nn.Tanh())
         #self.graphMLP1 = MLP(128, 64, activation_first=True, hidden_layer=3, hidden_dim=hidden_dim, activation = 'tanh')
         #self.graphMLP2 = MLP(64, 128, activation_first=True, hidden_layer=3, hidden_dim=hidden_dim, activation = 'tanh')
-        self.graph_conv1_hid1 = GraphConv(128, 128, norm='both', weight=True, bias=True, activation = nn.SiLU())
-        self.graph_conv2_hid2 = GraphConv(128, 128, norm='both', weight=True, bias=True, activation = nn.SiLU())
-        
+        self.graph_e_3 = GraphConv(128, 64, norm='both', weight=True, bias=True, activation = nn.SiLU())
+        self.graph_d_3 = GraphConv(64, 128, norm='both', weight=True, bias=True, activation = nn.SiLU())
+         """
+        # with NNConv
 
+        self.graph_e_1 = NNConv(128, hidden_dim)
+        self.graph_d_1 = NNConv(hidden_dim, 128)
+        self.graph_e_2 = NNConv(hidden_dim, hidden_dim)
+        self.graph_d_2 = NNConv(hidden_dim, hidden_dim)
+        #self.graphMLP1 = MLP(128, 64, activation_first=True, hidden_layer=3, hidden_dim=hidden_dim, activation = 'tanh')
+        #self.graphMLP2 = MLP(64, 128, activation_first=True, hidden_layer=3, hidden_dim=hidden_dim, activation = 'tanh')
+        self.graph_e_3 = NNConv(128, 64)
+        self.graph_d_3 = NNConv(64, 128)
+        
 
         """
 
@@ -447,9 +459,9 @@ class SimpleMDNetNew(nn.Module):  # no bond, no learnable node encoder
         self.length_scaler.partial_fit(length)
 
     def gencoder_mine(self, h: torch.Tensor, g: dgl.DGLGraph):
-        x = self.graph_conv1(g,h)
-        x = self.graph_conv_hid1(g,x)
-        x = self.graph_conv1_hid1(g,x)
+        x = self.graph_e_1(g,h)
+        x = self.graph_e_2(g,x)
+        x = self.graph_e_3(g,x)
         #x = self.graphMLP1(x)
         return x
      
@@ -457,9 +469,9 @@ class SimpleMDNetNew(nn.Module):  # no bond, no learnable node encoder
     def gdecoder_mine(self, h: torch.Tensor, g: dgl.DGLGraph):
         #x = self.graphMLP2(h)
 
-        x = self.graph_conv2_hid2(g,h)
-        x = self.graph_conv_hid2(g,x)
-        x = self.graph_conv2(g,x)
+        x = self.graph_d_3(g,h)
+        x = self.graph_d_2(g,x)
+        x = self.graph_d_1(g,x)
         return x
 
     

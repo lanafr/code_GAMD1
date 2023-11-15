@@ -196,7 +196,7 @@ class ParticleNetLightning(pl.LightningModule):
 
         regularization_loss = (torch.mean(graphem1)).abs()
 
-        loss = cord_loss + 0.5*rec_loss #+ 0.5/regularization_loss
+        loss = cord_loss + 0.5*rec_loss + 0.5/regularization_loss
 
         conservative_loss = (torch.mean(pred)).abs() #conservative loss penalizes size of the predictions (remove it, leave it?)
         loss_with_added = loss + LAMBDA2 * conservative_loss

@@ -64,7 +64,7 @@ class LJDataNew(Dataset):
         fname = f'data_{seed}_{sample_to_read}'#f'seed_{seed_to_read}_data_{sample_to_read}'
         fname_next = f'data_{seed}_{sample_to_read_next}'
 
-        #fname = f'data_6_367'
+        #fname = f'data_6_555'
         #fname_next = f'data_4_368'
 
         data_path = os.path.join(self.dataset_path, fname)
