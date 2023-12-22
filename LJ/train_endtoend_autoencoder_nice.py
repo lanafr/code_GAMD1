@@ -25,6 +25,11 @@ os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 #os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.75"
 #os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
 
+import dgl.nn
+import dgl.function as fn
+from dgl.ops import edge_softmax
+from dgl.utils import expand_as_pair
+
 # for water box
 CUTOFF_RADIUS = 7.5
 BOX_SIZE = 27.27
@@ -118,6 +123,24 @@ class ParticleNetLightning(pl.LightningModule):
         pred = pred.detach().cpu().numpy()
 
         return pred, graphem1, graphem2, emb
+
+    def decode_the_sequence(self, sequence_embeddings: torch.Tensor, first_graph: dgl.DGLGraph, t):
+        trajectory = []
+        graph_now = first_graph
+        
+        for i in range(t):
+            pos_next = self.pnet_model.gencoder_mine(sequence_embeddings[i],graph_now)
+            trajectory.append(pos_next)
+
+            edge_idx_tsr = self.search_for_neighbor(pos_next,
+                                                    self.nbr_searcher,
+                                                    self.nbrlst_to_edge_mask,
+                                                    'all')
+            graph_now = self.pnet_model.build_graph(edge_idx_tsr, pos_next)
+
+        return trajectory
+
+
     
 
     def get_edge_idx(self, nbrs, pos_jax, mask):
@@ -157,22 +180,18 @@ class ParticleNetLightning(pl.LightningModule):
         return edge_idx_tsr.long()
 
     def training_step(self, batch, batch_nb):
-        pos_lst = batch['pos']
         #gt_lst=batch['pos_next']
         gt_lst = batch ['pos']
         edge_idx_lst = []
         
         for b in range(len(gt_lst)):
-            pos, gt = pos_lst[b], gt_lst[b]
+            gt = gt_lst[b]
 
-            pos = np.mod(pos, BOX_SIZE) #also this should trivially be true if the simulations are correct
             gt = np.mod(gt, BOX_SIZE) #this I added
 
-            
-            pos_lst[b] = torch.from_numpy(pos).float().cuda()
             gt_lst[b] = torch.from_numpy(gt).float().cuda() #this I added
 
-            edge_idx_tsr = self.search_for_neighbor(pos,
+            edge_idx_tsr = self.search_for_neighbor(gt,
                                                     self.nbr_searcher,
                                                     self.nbrlst_to_edge_mask,
                                                     'all')
@@ -183,9 +202,10 @@ class ParticleNetLightning(pl.LightningModule):
         #pred = self.pnet_model(pos_lst,
         #                       edge_idx_lst,
         #                       )
-        pred, graphem1, graphem2, emb = self.pnet_model(pos_lst,
+        pred, graphem1, graphem2, emb = self.pnet_model(gt_lst,
                                    edge_idx_lst,
                                    )
+
 
         if self.loss_fn == 'mae':
             cord_loss = nn.L1Loss()(pred, gt)
@@ -202,8 +222,8 @@ class ParticleNetLightning(pl.LightningModule):
         loss_with_added = loss + LAMBDA2 * conservative_loss
 
         self.log('cord_loss', cord_loss, on_step=True, prog_bar=True, logger=True)
-        self.log(f'actual loss:{self.loss_fn}', loss, on_step=True, prog_bar=True, logger=True)
         self.log('graph rec loss', rec_loss, on_step=True, prog_bar=True, logger=True)
+        self.log(f'actual loss:{self.loss_fn}', loss, on_step=True, prog_bar=True, logger=True)
 
 
         return loss
@@ -215,7 +235,7 @@ class ParticleNetLightning(pl.LightningModule):
 
     def train_dataloader(self):
         dataset = LJDataNew(dataset_path=os.path.join(self.data_dir, 'lj_data'),
-                               sample_num=999, #this I changed
+                               sample_num=499, #this I changed
                                case_prefix='data_',
                                seed_num=10,
                                mode='train')
@@ -231,7 +251,7 @@ class ParticleNetLightning(pl.LightningModule):
 
     def val_dataloader(self):
         dataset = LJDataNew(dataset_path=os.path.join(self.data_dir, 'lj_data'),
-                               sample_num=999, #this I changed
+                               sample_num=499, #this I changed
                                case_prefix='data_',
                                seed_num=10,
                                mode='test')
@@ -248,39 +268,39 @@ class ParticleNetLightning(pl.LightningModule):
 
     def validation_step(self, batch, batch_nb):
         with torch.no_grad():
-
-            pos_lst = batch['pos']
             #gt_lst = batch['pos_next']
             gt_lst = batch['pos']
+
             edge_idx_lst = []
             for b in range(len(gt_lst)):
-                pos, gt = pos_lst[b], gt_lst[b]
-                pos = np.mod(pos, BOX_SIZE)
+                gt = gt_lst[b]
+
                 gt = np.mod(gt, BOX_SIZE) #this I added
 
                 #gt = self.scale_force(gt, self.train_data_scaler).cuda()
-                pos_lst[b] = torch.from_numpy(pos).float().cuda()
                 gt_lst[b] = torch.from_numpy(gt).float().cuda() #this I added
+
                 #gt_lst[b] = gt
 
-                edge_idx_tsr = self.search_for_neighbor(pos,
+                edge_idx_tsr = self.search_for_neighbor(gt,
                                                         self.nbr_searcher,
                                                         self.nbrlst_to_edge_mask,
                                                         'all')
                 edge_idx_lst += [edge_idx_tsr]
             gt = torch.cat(gt_lst, dim=0)
 
-            pred, graphem1, graphem2, emb = self.pnet_model(pos_lst, edge_idx_lst)
+            pred, graphem1, graphem2, emb = self.pnet_model(gt_lst, edge_idx_lst)
 
             mse = nn.MSELoss()(pred, gt)
             mse_for_graphs = nn.MSELoss()(graphem1, graphem2)
             mae = nn.L1Loss()(pred, gt)
             mae_for_graphs = nn.L1Loss()(graphem1, graphem2)
 
-            self.log('val mse for coordinates', mse, prog_bar=True, logger=True)
-            self.log('val mae for coordinates', mae, prog_bar=True, logger=True)
-            self.log('val mae for graphs', mae_for_graphs, prog_bar=True, logger=True)
-            self.log('val mse for graphs', mse_for_graphs, prog_bar=True, logger=True)
+
+            self.log('val coordinates (mse)', mse, prog_bar=True, logger=True)
+            self.log('val coordinates (mae)', mae, prog_bar=True, logger=True)
+            self.log('val graphs (mae)', mae_for_graphs, prog_bar=True, logger=True)
+            self.log('val graphs (mse)', mse_for_graphs, prog_bar=True, logger=True)
 
 
 class ModelCheckpointAtEpochEnd(pl.Callback):
@@ -358,7 +378,7 @@ def main():
     parser.add_argument('--min_epoch', default=30, type=int)
     parser.add_argument('--max_epoch', default=30, type=int)
     parser.add_argument('--lr', default=3e-4, type=float)
-    parser.add_argument('--cp_dir', default='./model_ckpt/autoencoder_for_graphs_withpos_and_no_reg_just_rec_loss')
+    parser.add_argument('--cp_dir', default='./model_ckpt/autoencoder_prvipravi')
     parser.add_argument('--state_ckpt_dir', default=None, type=str)
     parser.add_argument('--batch_size', default=4, type=int)
     parser.add_argument('--encoding_size', default=256, type=int)

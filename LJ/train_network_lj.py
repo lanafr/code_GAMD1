@@ -125,7 +125,7 @@ class ParticleNetLightning(pl.LightningModule):
             self.training_mean = scaler_info['mean']
             self.training_var = scaler_info['var']
 
-    """
+
     
     def forward(self, pos, feat, edge_idx_tsr):
         return self.denormalize(self.pnet_model(pos, feat, edge_idx_tsr.long()), self.training_var, self.training_mean)
@@ -493,7 +493,7 @@ def main():
     parser.add_argument('--min_epoch', default=30, type=int)
     parser.add_argument('--max_epoch', default=30, type=int)
     parser.add_argument('--lr', default=3e-4, type=float)
-    parser.add_argument('--cp_dir', default='./model_ckpt/autoencoder_for_graphs_withpos')
+    parser.add_argument('--cp_dir', default='./model_ckpt/try_autoencoding2000')
     parser.add_argument('--state_ckpt_dir', default=None, type=str)
     parser.add_argument('--batch_size', default=4, type=int)
     parser.add_argument('--encoding_size', default=256, type=int)

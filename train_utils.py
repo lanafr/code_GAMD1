@@ -61,8 +61,8 @@ class LJDataNew(Dataset):
         seed = idx // self.sample_num
         
         
-        fname = f'data_{seed}_{sample_to_read}'#f'seed_{seed_to_read}_data_{sample_to_read}'
-        fname_next = f'data_{seed}_{sample_to_read_next}'
+        fname = f'data_{seed}_{sample_to_read+500}'#f'seed_{seed_to_read}_data_{sample_to_read}'
+        fname_next = f'data_{seed}_{sample_to_read_next+500}'
 
         #fname = f'data_6_555'
         #fname_next = f'data_4_368'

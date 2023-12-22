@@ -45,14 +45,14 @@ class tempf(nn.Module):
         super().__init__()
         self.actv = nn.Tanh()
         self.dense1 = nn.Linear(in_channels, in_channels)
-        # self.dense2 = nn.Linear(in_channels, out_channels)
+        self.dense2 = nn.Linear(in_channels, out_channels)
         # self.dense3 = nn.Linear(out_channels, out_channels)
 
     def forward(self, h, x):
         out = self.dense1(x)
-        # out = self.actv(out)
-        # out = self.dense2(out)
-        # out = self.actv(out)
+        out = self.actv(out)
+        out = self.dense2(out)
+        out = self.actv(out)
         # out = self.dense3(out)
         return out
 
@@ -68,7 +68,11 @@ class temprnn(nn.Module):
         self.res = res
 
     def forward(self, h, x):
+        print(h[:, 0].size())
+        print(x.size())
         out = torch.cat([h[:, 0], h[:, 1], x], dim=1)
+        print(h[:, 0].size())
+        print(x.size())
         out = self.dense1(out)
         out = self.actv(out)
         out = self.dense2(out)
@@ -81,15 +85,19 @@ class temprnn(nn.Module):
 class MODEL(nn.Module):
     def __init__(self, res=False, cont=False):
         super(MODEL, self).__init__()
-        nhid = 24
+        nhid = 256
         self.cell = HeavyBallNODE(tempf(nhid, nhid), corr=0, corrf=True)
         # self.cell = HeavyBallNODE(tempf(nhid, nhid))
-        self.rnn = temprnn(128, nhid, nhid, res=res, cont=cont)
+        #self.try1 = NODEintegrate(self.cell)
+        self.rnn = temprnn(8, nhid, nhid, res=res, cont=cont)
         self.ode_rnn = ODE_RNN_with_Grad_Listener(self.cell, self.rnn, (2, nhid), None, tol=1e-7)
-        self.outlayer = nn.Linear(nhid, 128)
+        self.outlayer = nn.Linear(nhid, 8)
 
     def forward(self, t, x):
+        x = torch.tensor(x).to('cuda')
+        t = torch.tensor(t).to('cuda')
         out = self.ode_rnn(t, x, retain_grad=True)[0]
+        #out = self.try1(t, x)
         out = self.outlayer(out[:, :, 0])[1:]
         return out
 
@@ -116,7 +124,7 @@ def main():
 
         batchsize = 256
         train_start_time = time.time()
-        for b_n in range(0, data.train_x.shape[1], batchsize):
+        for b_n in range(0, len(data.train_x), batchsize):
             model.cell.nfe = 0
             predict = model(data.train_times[:, b_n:b_n + batchsize] / 64, data.train_x[:, b_n:b_n + batchsize])
             loss = criteria(predict, data.train_y[:, b_n:b_n + batchsize])

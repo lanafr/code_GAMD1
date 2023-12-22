@@ -63,7 +63,10 @@ export PATH="/home/guests/lana_frkin/.local/bin:$PATH"
 #python test_script/test_langevin.py
 #python generate_lj_data.py
 #python generate_lj_data_from_model.py
-python train_sequential_network_nice.py
+#python train_sequential_network_nice.py
+#python seq_network_prev.py
+#python actual_gamd.py
+python the_sequential_network.py
 #python test_script/rdf_graph.py
 #python test_script/test_nosehoover.py
 #python train_network_lj.py  --batch_size=1 --encoding_size 8 --hidden_dim 8 --edge_embedding_dim 8 --loss mae --use_layer_norm

@@ -21,6 +21,7 @@ from torchdyn.models import *
 from torchdyn.nn import *
 
 from dgl.nn import NNConv
+from dgl.nn import TAGConv
 
 
 def cubic_kernel(r, re):
@@ -84,20 +85,7 @@ class MLP(nn.Module):
 
     def forward(self, feat):
         return self.mlp_layer(feat)
-"""
-class NeuralOrdinaryDE(nn.Module):
-    def __init__(self,
-                f,
-                sensitivity,
-                solver):
-        super(NeuralOrdinaryDE, self).__init__()
-        #self.model = NeuralODE(f, sensitivity=sensitivity, solver=solver)
-        self.model = NeuralODE (f, sensitivity='interpolated_adjoint', solver='tsit5', atol=1e-5, rtol=1e-5)
-    
-    def forward(self, x):
-        return self.model(x)
         
-"""
 class SmoothConvLayerNew(nn.Module):
     def __init__(self,
                  in_node_feats,
@@ -223,7 +211,7 @@ class SmoothConvBlockNew(nn.Module):
 
         for l, conv_layer in enumerate(self.conv):
             if self.use_layer_norm or self.use_batch_norm:
-                h = conv_layer.forward(graph, self.norm_layers[l](h)) + h ## I changed ittttt
+                h = conv_layer.forward(graph, self.norm_layers[l](h)) + h
             else:
                 h = conv_layer.forward(graph, h) + h
 
@@ -325,47 +313,26 @@ class SimpleMDNetNew(nn.Module):  # no bond, no learnable node encoder
             self.box_size = box_size
         self.box_size = self.box_size
 
-        self.node_encoder = MLP(3, 128, hidden_layer=4, hidden_dim=hidden_dim, activation='leaky_relu')
-        self.node_dencoder = MLP(128, 3, hidden_layer=4, hidden_dim=hidden_dim, activation='leaky_relu')
+        #self.node_encoder = MLP(3, 256, hidden_layer=2, hidden_dim=hidden_dim, activation='leaky_relu')
+        #self.node_dencoder = MLP(256, 3, hidden_layer=2, hidden_dim=hidden_dim, activation='leaky_relu')
         #self.edge_encoder = MLP(3 + 1 + len(self.edge_expand.centers), self.edge_emb_dim, hidden_dim=hidden_dim,
         #                        activation='gelu')
         #self.edge_layer_norm = nn.LayerNorm(self.edge_emb_dim)
         #self.graph_decoder = MLP(encoding_size, out_feats, hidden_layer=2, hidden_dim=hidden_dim, activation='gelu')
         self.save_index = 0
 
-        """
-        #with GraphConv
-        
-        self.graph_e_1 = GraphConv(128, hidden_dim, norm='both', weight=True, bias=True)#, activation = nn.SiLU())
-        self.graph_d_1 = GraphConv(hidden_dim, 128, norm='both', weight=True, bias=True)#, activation = nn.Sigmoid())
-        self.graph_e_2 = GraphConv(hidden_dim, hidden_dim, norm='both', weight=True, bias=True, activation = nn.Tanh())
-        self.graph_d_2 = GraphConv(hidden_dim, hidden_dim, norm='both', weight=True, bias=True, activation = nn.Tanh())
+
+        # with TAGConv
+
+
+        self.graph_e_1 = TAGConv(3, 512) #, activation=nn.ReLU())
+        self.graph_d_1 = TAGConv(512, 3) #, activation=nn.ReLU())
+        self.graph_e_2 = TAGConv(512, 256, activation=nn.ReLU())
+        self.graph_d_2 = TAGConv(256, 512, activation=nn.GELU())
         #self.graphMLP1 = MLP(128, 64, activation_first=True, hidden_layer=3, hidden_dim=hidden_dim, activation = 'tanh')
         #self.graphMLP2 = MLP(64, 128, activation_first=True, hidden_layer=3, hidden_dim=hidden_dim, activation = 'tanh')
-        self.graph_e_3 = GraphConv(128, 64, norm='both', weight=True, bias=True, activation = nn.SiLU())
-        self.graph_d_3 = GraphConv(64, 128, norm='both', weight=True, bias=True, activation = nn.SiLU())
-         """
-        # with NNConv
-
-        self.graph_e_1 = NNConv(128, hidden_dim)
-        self.graph_d_1 = NNConv(hidden_dim, 128)
-        self.graph_e_2 = NNConv(hidden_dim, hidden_dim)
-        self.graph_d_2 = NNConv(hidden_dim, hidden_dim)
-        #self.graphMLP1 = MLP(128, 64, activation_first=True, hidden_layer=3, hidden_dim=hidden_dim, activation = 'tanh')
-        #self.graphMLP2 = MLP(64, 128, activation_first=True, hidden_layer=3, hidden_dim=hidden_dim, activation = 'tanh')
-        self.graph_e_3 = NNConv(128, 64)
-        self.graph_d_3 = NNConv(64, 128)
-        
-
-        """
-
-        self.graph_conv1 = GraphConv(3, 256, norm='both', weight=True, bias=True)#, activation = nn.SiLU())
-        self.graph_conv2 = GraphConv(256, 3, norm='both', weight=True, bias=True)#, activation = nn.Sigmoid())
-        self.graph_conv_hid1 = GraphConv(256, hidden_dim, norm='both', weight=True, bias=True, activation = nn.SiLU())
-        self.graph_conv_hid2 = GraphConv(hidden_dim, 256, norm='both', weight=True, bias=True, activation = nn.SiLU())
-        self.graphMLP1 = MLP(hidden_dim, 64, activation_first=True, hidden_layer=10, hidden_dim=hidden_dim, activation = 'silu')
-        self.graphMLP2 = MLP(64, hidden_dim, activation_first=True, hidden_layer=10, hidden_dim=hidden_dim, activation = 'silu')
-        """
+        self.graph_e_3 = TAGConv(256, 64, activation=nn.GELU())
+        self.graph_d_3 = TAGConv(64, 256, activation=nn.GELU())
 
 
     def calc_edge_feat(self,
@@ -411,16 +378,16 @@ class SimpleMDNetNew(nn.Module):  # no bond, no learnable node encoder
         fluid_graph = dgl.graph((neigh_idx, center_idx))
         
         #fluid_edge_feat = self.calc_edge_feat(center_idx, neigh_idx, fluid_pos)
-
         #fluid_edge_emb = self.edge_layer_norm(self.edge_encoder(fluid_edge_feat))  # [edge_num, 64]
+        #fluid_edge_emb = self.edge_encoder(fluid_edge_feat)  # [edge_num, 64]
         #fluid_edge_emb = self.edge_drop_out(fluid_edge_emb)
         #fluid_graph.edata['e'] = fluid_edge_emb
         
 
 
         #add node embeddings
-        #fluid_graph.ndata['e'] = fluid_pos
-        fluid_graph.ndata['e'] = self.node_encoder(fluid_pos)
+        fluid_graph.ndata['e'] = fluid_pos
+        #fluid_graph.ndata['e'] = self.node_encoder(fluid_pos)
 
         #graph_to_save = dgl.graph((neigh_idx, center_idx))
         #graph_to_save.ndata['e'] = self.node_encoder(fluid_pos)
@@ -459,9 +426,9 @@ class SimpleMDNetNew(nn.Module):  # no bond, no learnable node encoder
         self.length_scaler.partial_fit(length)
 
     def gencoder_mine(self, h: torch.Tensor, g: dgl.DGLGraph):
-        x = self.graph_e_1(g,h)
-        x = self.graph_e_2(g,x)
-        x = self.graph_e_3(g,x)
+        x = self.graph_e_1(g, h)
+        x = self.graph_e_2(g, x)
+        x = self.graph_e_3(g, x)
         #x = self.graphMLP1(x)
         return x
      
@@ -489,76 +456,34 @@ class SimpleMDNetNew(nn.Module):  # no bond, no learnable node encoder
 
         g_embed = self.gencoder_mine(fluid_graph.ndata['e'], fluid_graph)
         fluid_graph.ndata['e'] = self.gdecoder_mine(g_embed, fluid_graph)
-        pos = self.node_dencoder(fluid_graph.ndata['e'])
+        #pos = self.node_dencoder(fluid_graph.ndata['e'])
+        pos = fluid_graph.ndata['e']
 
         return pos, old_graph_nodes, fluid_graph.ndata['e'], g_embed
         #return pos
 
 
-class GCNLayer_for_autoencoding(nn.Module):
-    def __init__(self, in_feats, out_feats):
-        super(GCNLayer_for_autoencoding, self).__init__()
-        self.linear = nn.Linear(in_feats, out_feats)
-
-    def forward(self, g, feature):
-        # Creating a local scope so that all the stored ndata and edata
-        # (such as the `'h'` ndata below) are automatically popped out
-        # when the scope exits.
-
-        gcn_msg = fn.copy_u(u="e", out="m")
-        gcn_reduce = fn.sum(msg="m", out="e")
-
-        with g.local_scope():
-            g.ndata["e"] = feature
-            g.update_all(gcn_msg, gcn_reduce)
-            h = g.ndata["e"]
-            return self.linear(h)
-
-class GNNAutoencoder(nn.Module):
+class SimpleMDNetNew_GAMD(nn.Module):  # no bond, no learnable node encoder
     def __init__(self,
                  encoding_size,
                  out_feats,
                  box_size,   # can also be array
                  hidden_dim=128,
-                 conv_layer=2,
-                 edge_embedding_dim=1,
+                 conv_layer=4,
+                 edge_embedding_dim=128,
                  dropout=0.1,
                  drop_edge=True,
                  use_layer_norm=False):
-        super(GNNAutoencoder, self).__init__()
-        """
+        super(SimpleMDNetNew_GAMD, self).__init__()
         self.graph_conv = SmoothConvBlockNew(in_node_feats=encoding_size,
-                                             out_node_feats=64,
+                                             out_node_feats=encoding_size,
                                              hidden_dim=hidden_dim,
                                              conv_layer=conv_layer,
-                                             edge_emb_dim=1,
+                                             edge_emb_dim=edge_embedding_dim,
                                              use_layer_norm=use_layer_norm,
                                              use_batch_norm=not use_layer_norm,
                                              drop_edge=drop_edge,
                                              activation='silu')
-        """
-
-        
-        self.graph_conv1 = GraphConv(encoding_size, hidden_dim, norm='both', weight=True, bias=True)#, activation = nn.SiLU())
-        #self.graph_conv1 = MLP(encoding_size, hidden_dim, activation_first=True, hidden_layer=1, hidden_dim=hidden_dim, activation = 'silu')
-        self.graph_conv2 = GraphConv(hidden_dim, encoding_size, norm='both', weight=True, bias=True)#, activation = nn.Sigmoid())
-        #self.graph_conv2 = MLP(hidden_dim, encoding_size, activation_first=True, hidden_layer=1, hidden_dim=hidden_dim, activation = 'silu')
-        #self.graph_conv1_hid1 = GraphConv(128, 64, norm='both', weight=True, bias=True, activation = nn.SiLU())
-        #self.graph_conv2_hid2 = GraphConv(64, 128, norm='both', weight=True, bias=True, activation = nn.SiLU())
-        self.graph_conv_hid1 = GraphConv(hidden_dim, hidden_dim, norm='both', weight=True, bias=True, activation = nn.SiLU())
-        self.graph_conv_hid2 = GraphConv(hidden_dim, hidden_dim, norm='both', weight=True, bias=True, activation = nn.SiLU())
-        self.graphMLP1 = MLP(hidden_dim, 64, activation_first=True, hidden_layer=1, hidden_dim=hidden_dim, activation = 'silu')
-        self.graphMLP2 = MLP(64, hidden_dim, activation_first=True, hidden_layer=1, hidden_dim=hidden_dim, activation = 'silu')
-        
-        
-        """
-        self.graph_conv1 = GCNLayer_for_autoencoding(encoding_size, hidden_dim)
-        self.graph_conv2 = GCNLayer_for_autoencoding(hidden_dim, encoding_size)
-        self.graph_conv1_hid1 = GCNLayer_for_autoencoding(hidden_dim, 64)
-        self.graph_conv2_hid2 = GCNLayer_for_autoencoding(64, hidden_dim)
-        self.graph_conv_hid1 = GCNLayer_for_autoencoding(hidden_dim, hidden_dim)
-        self.graph_conv_hid2 = GCNLayer_for_autoencoding(hidden_dim, hidden_dim)
-        """
 
         self.edge_emb_dim = edge_embedding_dim
         self.edge_expand = RBFExpansion(high=1, gap=0.025)
@@ -574,23 +499,14 @@ class GNNAutoencoder(nn.Module):
             self.box_size = box_size
         self.box_size = self.box_size
 
-        #self.node_encoder = MLP(3, encoding_size, hidden_layer=2, hidden_dim=hidden_dim, activation='gelu')
-        #self.edge_encoder = MLP(3 + 1 + len(self.edge_expand.centers), self.edge_emb_dim, hidden_dim=hidden_dim,
-                                #activation='gelu')
-        #self.edge_layer_norm = nn.LayerNorm(self.edge_emb_dim)
-        #self.graph_decoder = MLP(encoding_size, out_feats, hidden_layer=2, hidden_dim=hidden_dim, activation='gelu')
-
-        """
-        layers_en = [GraphConv(encoding_size, hidden_dim, activation=F.relu, allow_zero_in_degree=True),
-                  GraphConv(hidden_dim, 64, activation=lambda x: x, allow_zero_in_degree=True),
-                  GraphConv(hidden_dim, 64, activation=lambda x: x, allow_zero_in_degree=True)]
-        self.layers_en = nn.ModuleList(layers_en)
-
-        layers_de = [GraphConv(64, 128, activation=F.relu, allow_zero_in_degree=True),
-                 GraphConv(128, hidden_dim, activation=lambda x: x, allow_zero_in_degree=True),
-                 GraphConv(hidden_dim, encoding_size, activation=lambda x: x, allow_zero_in_degree=True)]
-        self.layers_de = nn.ModuleList(layers_de)
-        """
+        #self.node_emb = nn.Parameter(torch.randn((1, encoding_size)), requires_grad=True)
+        self.node_emb = MLP(out_feats, encoding_size, hidden_layer=2, hidden_dim=hidden_dim, activation='gelu')
+        self.edge_encoder = MLP(3 + 1 + len(self.edge_expand.centers), self.edge_emb_dim, hidden_dim=hidden_dim,
+                                activation='gelu')
+        self.edge_layer_norm = nn.LayerNorm(self.edge_emb_dim)
+        self.graph_force_decoder = MLP(encoding_size, out_feats, hidden_layer=2, hidden_dim=hidden_dim, activation='gelu')
+        self.pos_decoder = MLP(encoding_size, out_feats, hidden_layer=2, hidden_dim=hidden_dim, activation='gelu')
+        
 
     def calc_edge_feat(self,
                        src_idx: torch.Tensor,
@@ -625,7 +541,195 @@ class GNNAutoencoder(nn.Module):
                                self.edge_expand(rel_pos_norm)), dim=1)
         return edge_feat
 
-    """
+    def build_graph(self,
+                    fluid_edge_idx: torch.Tensor,
+                    fluid_pos: torch.Tensor,
+                    self_loop=True) -> dgl.DGLGraph:
+
+        center_idx = fluid_edge_idx[0, :]  # [edge_num, 1]
+        neigh_idx = fluid_edge_idx[1, :]
+        fluid_graph = dgl.graph((neigh_idx, center_idx))
+        fluid_edge_feat = self.calc_edge_feat(center_idx, neigh_idx, fluid_pos)
+
+        fluid_edge_emb = self.edge_layer_norm(self.edge_encoder(fluid_edge_feat))  # [edge_num, 64]
+        fluid_edge_emb = self.edge_drop_out(fluid_edge_emb)
+        fluid_graph.edata['e'] = fluid_edge_emb
+        fluid_graph.ndata['e'] = self.node_emb(fluid_pos)
+
+        # add self loop for fluid particles
+        if self_loop:
+            fluid_graph.add_self_loop()
+        return fluid_graph
+
+    def build_graph_batches(self, pos_lst, edge_idx_lst):
+        graph_lst = []
+        for pos, edge_idx in zip(pos_lst, edge_idx_lst):
+            graph = self.build_graph(edge_idx, pos)
+            graph_lst += [graph]
+        batched_graph = dgl.batch(graph_lst)
+        return batched_graph
+
+    def _update_length_stat(self, new_mean, new_std):
+        self.length_mean[0] = new_mean[0]
+        self.length_std[0] = new_std[0]
+
+    def fit_length(self, length):
+        if not isinstance(length, np.ndarray):
+            length = length.detach().cpu().numpy().reshape(-1, 1)
+        self.length_scaler.partial_fit(length)
+
+    def forward(self,
+                fluid_pos_lst: List[torch.Tensor],  # list of [N, 3]
+                fluid_edge_lst: List[torch.Tensor]
+                ) -> torch.Tensor:
+        if len(fluid_pos_lst) > 1:
+            fluid_graph = self.build_graph_batches(fluid_pos_lst, fluid_edge_lst)
+        else:
+            fluid_graph = self.build_graph(fluid_edge_lst[0], fluid_pos_lst[0])
+        num = np.sum([pos.shape[0] for pos in fluid_pos_lst])
+        x = fluid_graph.ndata['e']
+        x = self.graph_conv(x, fluid_graph)
+
+        force = self.graph_force_decoder(x)
+        pos_fin = self.pos_decoder(fluid_graph.ndata['e'])
+
+        emb = fluid_graph.ndata['e']
+
+        return force, pos_fin, emb
+
+
+"""
+class GCNLayer_for_autoencoding(nn.Module):
+    def __init__(self, in_feats, out_feats):
+        super(GCNLayer_for_autoencoding, self).__init__()
+        self.linear = nn.Linear(in_feats, out_feats)
+
+    def forward(self, g, feature):
+        # Creating a local scope so that all the stored ndata and edata
+        # (such as the `'h'` ndata below) are automatically popped out
+        # when the scope exits.
+
+        gcn_msg = fn.copy_u(u="e", out="m")
+        gcn_reduce = fn.sum(msg="m", out="e")
+
+        with g.local_scope():
+            g.ndata["e"] = feature
+            g.update_all(gcn_msg, gcn_reduce)
+            h = g.ndata["e"]
+            return self.linear(h)
+
+class GNNAutoencoder(nn.Module):
+    def __init__(self,
+                 encoding_size,
+                 out_feats,
+                 box_size,   # can also be array
+                 hidden_dim=128,
+                 conv_layer=2,
+                 edge_embedding_dim=1,
+                 dropout=0.1,
+                 drop_edge=True,
+                 use_layer_norm=False):
+        super(GNNAutoencoder, self).__init__()
+        
+        self.graph_conv = SmoothConvBlockNew(in_node_feats=encoding_size,
+                                             out_node_feats=64,
+                                             hidden_dim=hidden_dim,
+                                             conv_layer=conv_layer,
+                                             edge_emb_dim=1,
+                                             use_layer_norm=use_layer_norm,
+                                             use_batch_norm=not use_layer_norm,
+                                             drop_edge=drop_edge,
+                                             activation='silu')
+    
+
+        
+        self.graph_conv1 = GraphConv(encoding_size, hidden_dim, norm='both', weight=True, bias=True)#, activation = nn.SiLU())
+        #self.graph_conv1 = MLP(encoding_size, hidden_dim, activation_first=True, hidden_layer=1, hidden_dim=hidden_dim, activation = 'silu')
+        self.graph_conv2 = GraphConv(hidden_dim, encoding_size, norm='both', weight=True, bias=True)#, activation = nn.Sigmoid())
+        #self.graph_conv2 = MLP(hidden_dim, encoding_size, activation_first=True, hidden_layer=1, hidden_dim=hidden_dim, activation = 'silu')
+        #self.graph_conv1_hid1 = GraphConv(128, 64, norm='both', weight=True, bias=True, activation = nn.SiLU())
+        #self.graph_conv2_hid2 = GraphConv(64, 128, norm='both', weight=True, bias=True, activation = nn.SiLU())
+        self.graph_conv_hid1 = GraphConv(hidden_dim, hidden_dim, norm='both', weight=True, bias=True, activation = nn.SiLU())
+        self.graph_conv_hid2 = GraphConv(hidden_dim, hidden_dim, norm='both', weight=True, bias=True, activation = nn.SiLU())
+        self.graphMLP1 = MLP(hidden_dim, 64, activation_first=True, hidden_layer=1, hidden_dim=hidden_dim, activation = 'silu')
+        self.graphMLP2 = MLP(64, hidden_dim, activation_first=True, hidden_layer=1, hidden_dim=hidden_dim, activation = 'silu')
+        
+        
+        
+        self.graph_conv1 = GCNLayer_for_autoencoding(encoding_size, hidden_dim)
+        self.graph_conv2 = GCNLayer_for_autoencoding(hidden_dim, encoding_size)
+        self.graph_conv1_hid1 = GCNLayer_for_autoencoding(hidden_dim, 64)
+        self.graph_conv2_hid2 = GCNLayer_for_autoencoding(64, hidden_dim)
+        self.graph_conv_hid1 = GCNLayer_for_autoencoding(hidden_dim, hidden_dim)
+        self.graph_conv_hid2 = GCNLayer_for_autoencoding(hidden_dim, hidden_dim)
+        
+
+        self.edge_emb_dim = edge_embedding_dim
+        self.edge_expand = RBFExpansion(high=1, gap=0.025)
+        self.edge_drop_out = nn.Dropout(dropout)
+
+        self.length_mean = nn.Parameter(torch.tensor([0.]), requires_grad=False)
+        self.length_std = nn.Parameter(torch.tensor([1.]), requires_grad=False)
+        self.length_scaler = StandardScaler()
+
+        if isinstance(box_size, np.ndarray):
+            self.box_size = torch.from_numpy(box_size).float()
+        else:
+            self.box_size = box_size
+        self.box_size = self.box_size
+
+        #self.node_encoder = MLP(3, encoding_size, hidden_layer=2, hidden_dim=hidden_dim, activation='gelu')
+        #self.edge_encoder = MLP(3 + 1 + len(self.edge_expand.centers), self.edge_emb_dim, hidden_dim=hidden_dim,
+                                #activation='gelu')
+        #self.edge_layer_norm = nn.LayerNorm(self.edge_emb_dim)
+        #self.graph_decoder = MLP(encoding_size, out_feats, hidden_layer=2, hidden_dim=hidden_dim, activation='gelu')
+
+        
+        layers_en = [GraphConv(encoding_size, hidden_dim, activation=F.relu, allow_zero_in_degree=True),
+                  GraphConv(hidden_dim, 64, activation=lambda x: x, allow_zero_in_degree=True),
+                  GraphConv(hidden_dim, 64, activation=lambda x: x, allow_zero_in_degree=True)]
+        self.layers_en = nn.ModuleList(layers_en)
+
+        layers_de = [GraphConv(64, 128, activation=F.relu, allow_zero_in_degree=True),
+                 GraphConv(128, hidden_dim, activation=lambda x: x, allow_zero_in_degree=True),
+                 GraphConv(hidden_dim, encoding_size, activation=lambda x: x, allow_zero_in_degree=True)]
+        self.layers_de = nn.ModuleList(layers_de)
+        
+
+    def calc_edge_feat(self,
+                       src_idx: torch.Tensor,
+                       dst_idx: torch.Tensor,
+                       pos_src: torch.Tensor,
+                       pos_dst=None) -> torch.Tensor:
+        # this is the raw input feature
+
+        # to enhance computation performance, dont track their calculation on graph
+        if pos_dst is None:
+            pos_dst = pos_src
+
+        with torch.no_grad():
+            rel_pos = pos_dst[dst_idx.long()] - pos_src[src_idx.long()]
+            if isinstance(self.box_size, torch.Tensor):
+                rel_pos_periodic = torch.remainder(rel_pos + 0.5 * self.box_size.to(rel_pos.device),
+                                                   self.box_size.to(rel_pos.device)) - 0.5 * self.box_size.to(rel_pos.device)
+            else:
+                rel_pos_periodic = torch.remainder(rel_pos + 0.5 * self.box_size,
+                                                   self.box_size) - 0.5 * self.box_size
+
+            rel_pos_norm = rel_pos_periodic.norm(dim=1).view(-1, 1)  # [edge_num, 1]
+            rel_pos_periodic /= rel_pos_norm + 1e-8   # normalized
+
+        if self.training:
+            self.fit_length(rel_pos_norm)
+            self._update_length_stat(self.length_scaler.mean_, np.sqrt(self.length_scaler.var_))
+
+        rel_pos_norm = (rel_pos_norm - self.length_mean) / self.length_std
+        edge_feat = torch.cat((rel_pos_periodic,
+                               rel_pos_norm,
+                               self.edge_expand(rel_pos_norm)), dim=1)
+        return edge_feat
+
+    
     def build_graph(self,
                     fluid_edge_idx: torch.Tensor,
                     fluid_pos: torch.Tensor,
@@ -667,7 +771,7 @@ class GNNAutoencoder(nn.Module):
         if not isinstance(length, np.ndarray):
             length = length.detach().cpu().numpy().reshape(-1, 1)
         self.length_scaler.partial_fit(length)
-    """
+    
     
     def gencoder_mine(self, h: torch.Tensor, g: dgl.DGLGraph):
         x = self.graph_conv1(g,h)
@@ -690,3 +794,4 @@ class GNNAutoencoder(nn.Module):
         g.ndata['e'] = self.gdecoder_mine(g_embed, g)
 
         return g
+"""

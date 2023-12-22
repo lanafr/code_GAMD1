@@ -1,0 +1,57 @@
+2023-12-22 21:45:43.966089: I external/xla/xla/service/service.cc:168] XLA service 0x7c9fa60 initialized for platform Interpreter (this does not guarantee that XLA will be used). Devices:
+2023-12-22 21:45:43.966124: I external/xla/xla/service/service.cc:176]   StreamExecutor device (0): Interpreter, <undefined>
+2023-12-22 21:45:43.990553: I external/xla/xla/pjrt/tfrt_cpu_pjrt_client.cc:218] TfrtCpuClient created.
+2023-12-22 21:45:44.514502: I external/xla/xla/service/service.cc:168] XLA service 0x7e589a0 initialized for platform CUDA (this does not guarantee that XLA will be used). Devices:
+2023-12-22 21:45:44.514539: I external/xla/xla/service/service.cc:176]   StreamExecutor device (0): NVIDIA A40, Compute Capability 8.6
+2023-12-22 21:45:44.514888: I external/xla/xla/pjrt/gpu/se_gpu_pjrt_client.cc:198] Using BFC allocator.
+2023-12-22 21:45:44.514924: I external/xla/xla/pjrt/gpu/gpu_helpers.cc:105] XLA backend allocating 35730898944 bytes on device 0 for BFCAllocator.
+2023-12-22 21:45:48.997591: I external/xla/xla/stream_executor/cuda/cuda_dnn.cc:424] Loaded cuDNN version 8500
+2023-12-22 21:45:49.082757: I external/xla/xla/stream_executor/cuda/cuda_asm_compiler.cc:52] Using nvlink for parallel linking
+wandb: Currently logged in as: lana4655 (literallythehardestprojectever). Use `wandb login --relogin` to force relogin
+wandb: wandb version 0.16.1 is available!  To upgrade, please run:
+wandb:  $ pip install wandb --upgrade
+wandb: Tracking run with wandb version 0.15.5
+wandb: Run data is saved locally in /home/guests/lana_frkin/GAMDplus/code/LJ/wandb/run-20231222_214602-ttvay77r
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run Sequential model
+wandb: ⭐️ View project at https://wandb.ai/literallythehardestprojectever/NeuralODE%20jej
+wandb: 🚀 View run at https://wandb.ai/literallythehardestprojectever/NeuralODE%20jej/runs/ttvay77r
+GPU available: True, used: False
+TPU available: False, using: 0 TPU cores
+Set SLURM handle signals.
+
+  | Name  | Type     | Params
+-----------------------------------
+0 | model | ODEBlock | 1.3 M 
+-----------------------------------
+1.3 M     Trainable params
+0         Non-trainable params
+1.3 M     Total params
+5.384     Total estimated model params size (MB)
+WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
+WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
+WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
+WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
+WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
+WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
+WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
+WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
+WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
+WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
+WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
+WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
+WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
+WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
+WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
+WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
+WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
+WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
+WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
+WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
+WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
+WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
+WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
+WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
+WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
+WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
+slurmstepd: error: *** JOB 29997 ON unimatrix1 CANCELLED AT 2023-12-22T22:26:50 ***

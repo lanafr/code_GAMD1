@@ -42,7 +42,7 @@ args = SimpleNamespace(use_layer_norm=False,
                        update_edge=False,
                        use_part=False,
                       data_dir='',
-                      loss='mae')
+                      loss='mse')
 model = ParticleNetLightning(args).load_from_checkpoint(PATH, args=args)
 model.load_training_stats(SCALER_CKPT)
 model.cuda()
@@ -119,19 +119,19 @@ for i in range(999):
     (pos_hopefully_same, graph1, graph2) = model.predict_nextpos(gt)
     pos_lst.append(pos_hopefully_same)
 """
-gt_all = np.load(f'md_dataset/lj_data/data_3_785.npz')
+gt_all = np.load(f'md_dataset/lj_data/data_3_567.npz')
 gt = gt_all['pos']
-pos_hopefully_same, graph1, graph2 = model.predict_nextpos(gt)
+pos_hopefully_same, graph1, graph2, embed = model.predict_nextpos(gt)
 """
 gt_lst = [torch.from_numpy(arr) for arr in gt_lst]
 gt_cat = torch.cat(gt_lst, dim=0)
 pos_lst = [torch.from_numpy(arr) for arr in pos_lst]
 pos_cat = torch.cat(pos_lst, dim=0)
 """
-mae = nn.L1Loss()(torch.tensor(pos_hopefully_same), torch.tensor(gt))
+mse = nn.MSELoss()(torch.tensor(pos_hopefully_same), torch.tensor(gt))
 
 print("Loss is:")
-print(mae)
+print(mse)
 
 print("Pos original:")
 print(gt)
