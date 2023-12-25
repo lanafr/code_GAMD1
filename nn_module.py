@@ -313,8 +313,8 @@ class SimpleMDNetNew(nn.Module):  # no bond, no learnable node encoder
             self.box_size = box_size
         self.box_size = self.box_size
 
-        #self.node_encoder = MLP(3, 256, hidden_layer=2, hidden_dim=hidden_dim, activation='leaky_relu')
-        #self.node_dencoder = MLP(256, 3, hidden_layer=2, hidden_dim=hidden_dim, activation='leaky_relu')
+        self.node_encoder = MLP(3, 256, hidden_layer=2, hidden_dim=hidden_dim, activation='leaky_relu')
+        self.node_dencoder = MLP(256, 3, hidden_layer=2, hidden_dim=hidden_dim, activation='leaky_relu')
         #self.edge_encoder = MLP(3 + 1 + len(self.edge_expand.centers), self.edge_emb_dim, hidden_dim=hidden_dim,
         #                        activation='gelu')
         #self.edge_layer_norm = nn.LayerNorm(self.edge_emb_dim)
@@ -325,14 +325,14 @@ class SimpleMDNetNew(nn.Module):  # no bond, no learnable node encoder
         # with TAGConv
 
 
-        self.graph_e_1 = TAGConv(3, 512) #, activation=nn.ReLU())
-        self.graph_d_1 = TAGConv(512, 3) #, activation=nn.ReLU())
-        self.graph_e_2 = TAGConv(512, 256, activation=nn.ReLU())
+        self.graph_e_1 = TAGConv(256, 512, activation=nn.ReLU())
+        self.graph_d_1 = TAGConv(512, 256, activation=nn.ReLU())
+        self.graph_e_2 = TAGConv(512, 256, activation=nn.GELU())
         self.graph_d_2 = TAGConv(256, 512, activation=nn.GELU())
         #self.graphMLP1 = MLP(128, 64, activation_first=True, hidden_layer=3, hidden_dim=hidden_dim, activation = 'tanh')
         #self.graphMLP2 = MLP(64, 128, activation_first=True, hidden_layer=3, hidden_dim=hidden_dim, activation = 'tanh')
-        self.graph_e_3 = TAGConv(256, 64, activation=nn.GELU())
-        self.graph_d_3 = TAGConv(64, 256, activation=nn.GELU())
+        self.graph_e_3 = TAGConv(256, 32, activation=nn.GELU())
+        self.graph_d_3 = TAGConv(32, 256, activation=nn.GELU())
 
 
     def calc_edge_feat(self,
@@ -386,8 +386,8 @@ class SimpleMDNetNew(nn.Module):  # no bond, no learnable node encoder
 
 
         #add node embeddings
-        fluid_graph.ndata['e'] = fluid_pos
-        #fluid_graph.ndata['e'] = self.node_encoder(fluid_pos)
+        #fluid_graph.ndata['e'] = fluid_pos
+        fluid_graph.ndata['e'] = self.node_encoder(fluid_pos)
 
         #graph_to_save = dgl.graph((neigh_idx, center_idx))
         #graph_to_save.ndata['e'] = self.node_encoder(fluid_pos)
@@ -438,8 +438,9 @@ class SimpleMDNetNew(nn.Module):  # no bond, no learnable node encoder
 
         x = self.graph_d_3(g,h)
         x = self.graph_d_2(g,x)
-        x = self.graph_d_1(g,x)
-        return x
+        x1 = self.graph_d_1(g,x)
+        x = self.node_dencoder(x1)
+        return x, x1
 
     
 
@@ -455,11 +456,11 @@ class SimpleMDNetNew(nn.Module):  # no bond, no learnable node encoder
         old_graph_nodes = fluid_graph.ndata['e']
 
         g_embed = self.gencoder_mine(fluid_graph.ndata['e'], fluid_graph)
-        fluid_graph.ndata['e'] = self.gdecoder_mine(g_embed, fluid_graph)
+        fluid_graph.ndata['e'], new_graph_nodes = self.gdecoder_mine(g_embed, fluid_graph)
         #pos = self.node_dencoder(fluid_graph.ndata['e'])
         pos = fluid_graph.ndata['e']
 
-        return pos, old_graph_nodes, fluid_graph.ndata['e'], g_embed
+        return pos, old_graph_nodes, new_graph_nodes, g_embed
         #return pos
 
 

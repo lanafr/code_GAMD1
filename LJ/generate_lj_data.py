@@ -105,3 +105,6 @@ for seed in range(1):
                  vel=vel,
                  forces=force)
         simulation.step(50)
+    box_vectors = state.getPeriodicBoxVectors(asNumpy=True).value_in_unit(unit.angstrom)
+    print("Box Vectors:")
+    print(box_vectors)

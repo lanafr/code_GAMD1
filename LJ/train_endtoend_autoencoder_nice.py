@@ -124,24 +124,33 @@ class ParticleNetLightning(pl.LightningModule):
 
         return pred, graphem1, graphem2, emb
 
+    def make_a_graph(self,pos):
+        edge_idx_tsr = self.search_for_neighbor(pos,
+                                                    self.nbr_searcher,
+                                                    self.nbrlst_to_edge_mask,
+                                                    'all')
+
+        center_idx = edge_idx_tsr[0, :]  # [edge_num, 1]
+        neigh_idx = edge_idx_tsr[1, :]
+        graph_now = dgl.graph((neigh_idx, center_idx))
+
+        return graph_now
+
     def decode_the_sequence(self, sequence_embeddings: torch.Tensor, first_graph: dgl.DGLGraph, t):
         trajectory = []
         graph_now = first_graph
         
         for i in range(t):
-            pos_next = self.pnet_model.gencoder_mine(sequence_embeddings[i],graph_now)
+            pos_next, graph_emb = self.pnet_model.gdecoder_mine(sequence_embeddings[i],graph_now)
             trajectory.append(pos_next)
+            
+            pos_next = pos_next.detach().cpu().numpy()
 
-            edge_idx_tsr = self.search_for_neighbor(pos_next,
-                                                    self.nbr_searcher,
-                                                    self.nbrlst_to_edge_mask,
-                                                    'all')
-            graph_now = self.pnet_model.build_graph(edge_idx_tsr, pos_next)
+            
+            graph_now = self.make_a_graph(pos_next)
 
         return trajectory
 
-
-    
 
     def get_edge_idx(self, nbrs, pos_jax, mask):
         dummy_center_idx = nbrs.idx.copy()

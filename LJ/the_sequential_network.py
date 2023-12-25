@@ -53,15 +53,38 @@ import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 
+def build_model(args, ckpt=None):
+
+    param_dict = {
+                  'encoding_size': args.encoding_size,
+                  }
+
+    print("Using following set of hyper-parameters")
+    print(param_dict)
+
+    encoding_size = args.encoding_size
+
+    func = f1(encoding_size)
+    
+    model = ODEBlock(func)
+
+    model.cuda()
+
+    if ckpt is not None:
+        print('Loading model weights from: ', ckpt)
+        model.load_state_dict((torch.load(ckpt)))
+    return model
+
 
 class Learner(pl.LightningModule):
-    def __init__(self, model:nn.Module, epoch_num=100, batch_size=1, learning_rate=3e-4, log_freq=1,
+    def __init__(self, args, epoch_num=100, batch_size=1, learning_rate=3e-4, log_freq=1,
                  model_weights_ckpt=None, scaler_ckpt=None):
         super().__init__()
-        self.model = model
+        self.model = build_model(args, model_weights_ckpt)
         self.learning_rate = learning_rate
         self.batch_size = batch_size
         self.log_freq = log_freq
+        self.epoch_num = epoch_num
         #self.mlp1 = nn.Linear(128, 512)
         #self.mlp2 = nn.Linear(512, 128)
 
@@ -133,7 +156,7 @@ class Learner(pl.LightningModule):
 
     def configure_optimizers(self):
         optim = torch.optim.Adam(self.parameters(), lr=0.001)
-        sched = StepLR(optim, step_size=5, gamma=0.001**(10/500)) ## changed 5 to 2
+        sched = StepLR(optim, step_size=2, gamma=0.001**(10/500)) ## changed 5 to 2
         return [optim], [sched]
 
 class ModelCheckpointAtEpochEnd(pl.Callback):
@@ -226,13 +249,6 @@ def train_model(args):
     wandb_logger = WandbLogger()
     device = torch.device("cuda")
 
-    
-    cwd = os.getcwd()
-    model_check_point_dir = os.path.join(cwd, check_point_dir)
-    os.makedirs(model_check_point_dir, exist_ok=True)
-    epoch_end_callback = ModelCheckpointAtEpochEnd(filepath=model_check_point_dir, save_step_frequency=10)
-    checkpoint_callback = pl.callbacks.ModelCheckpoint()
-
     #lstm_cell = nn.LSTMCell(input_size=128, hidden_size=512).to(device)
 
     #model = NeuralODE(f1(encoding_size), sensitivity='adjoint', solver='rk4', solver_adjoint='dopri5', atol_adjoint=1e-4, rtol_adjoint=1e-4).to(device)
@@ -243,11 +259,24 @@ def train_model(args):
     model = ODEBlock(func)
     model.cuda()
 
-    learn = Learner(model, epoch_num=max_epoch,
+    learn = Learner(epoch_num=max_epoch,
                                  learning_rate=lr,
                                  model_weights_ckpt=weight_ckpt,
-                                 batch_size=batch_size)
-    trainer = pl.Trainer(logger = WandbLogger(), min_epochs=min_epoch, max_epochs=max_epoch, log_every_n_steps=1)
+                                 batch_size=batch_size,
+                                 args=args)
+
+    
+    cwd = os.getcwd()
+    model_check_point_dir = os.path.join(cwd, check_point_dir)
+    os.makedirs(model_check_point_dir, exist_ok=True)
+    epoch_end_callback = ModelCheckpointAtEpochEnd(filepath=model_check_point_dir, save_step_frequency=10)
+    checkpoint_callback = pl.callbacks.ModelCheckpoint()
+
+    trainer = pl.Trainer(logger = WandbLogger(),
+                        min_epochs=min_epoch,
+                        max_epochs=max_epoch,
+                        callbacks=[epoch_end_callback, checkpoint_callback],
+                        log_every_n_steps=1)
     trainer.fit(learn)
 
 def main():
@@ -258,7 +287,7 @@ def main():
     parser.add_argument('--cp_dir', default='./model_ckpt/sequential_network_withprvipravi')
     parser.add_argument('--state_ckpt_dir', default=None, type=str)
     parser.add_argument('--batch_size', default=1, type=int)
-    parser.add_argument('--encoding_size', default=64, type=int)
+    parser.add_argument('--encoding_size', default=32, type=int)
     parser.add_argument('--hidden_dim', default=128, type=int)
     parser.add_argument('--use_layer_norm', action='store_true')
     parser.add_argument('--num_gpu', default=-1, type=int)

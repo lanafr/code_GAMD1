@@ -1,0 +1,26 @@
+2023-12-25 20:31:06.106927: I external/xla/xla/service/service.cc:168] XLA service 0x70b89c0 initialized for platform Interpreter (this does not guarantee that XLA will be used). Devices:
+2023-12-25 20:31:06.107083: I external/xla/xla/service/service.cc:176]   StreamExecutor device (0): Interpreter, <undefined>
+2023-12-25 20:31:06.112469: I external/xla/xla/pjrt/tfrt_cpu_pjrt_client.cc:218] TfrtCpuClient created.
+2023-12-25 20:31:06.479886: I external/xla/xla/service/service.cc:168] XLA service 0x6fd8120 initialized for platform CUDA (this does not guarantee that XLA will be used). Devices:
+2023-12-25 20:31:06.479946: I external/xla/xla/service/service.cc:176]   StreamExecutor device (0): NVIDIA A40, Compute Capability 8.6
+2023-12-25 20:31:06.480340: I external/xla/xla/pjrt/gpu/se_gpu_pjrt_client.cc:198] Using BFC allocator.
+2023-12-25 20:31:06.480380: I external/xla/xla/pjrt/gpu/gpu_helpers.cc:105] XLA backend allocating 35716694016 bytes on device 0 for BFCAllocator.
+2023-12-25 20:31:09.001457: I external/xla/xla/stream_executor/cuda/cuda_dnn.cc:424] Loaded cuDNN version 8500
+2023-12-25 20:31:09.056495: I external/xla/xla/stream_executor/cuda/cuda_asm_compiler.cc:52] Using nvlink for parallel linking
+wandb: Currently logged in as: lana4655 (literallythehardestprojectever). Use `wandb login --relogin` to force relogin
+wandb: wandb version 0.16.1 is available!  To upgrade, please run:
+wandb:  $ pip install wandb --upgrade
+wandb: Tracking run with wandb version 0.15.5
+wandb: Run data is saved locally in /home/guests/lana_frkin/GAMDplus/code/LJ/wandb/run-20231225_203120-gyi7txpx
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run Sequential model
+wandb: ⭐️ View project at https://wandb.ai/literallythehardestprojectever/NeuralODE%20jej
+wandb: 🚀 View run at https://wandb.ai/literallythehardestprojectever/NeuralODE%20jej/runs/gyi7txpx
+WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
+WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
+WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
+WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
+WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
+WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
+/var/spool/slurm/d/job30157/slurm_script: line 69: 498405 Killed                  python3.8 entire_network.py
+slurmstepd: error: Detected 1 oom-kill event(s) in StepId=30157.batch cgroup. Some of your processes may have been killed by the cgroup out-of-memory handler.
