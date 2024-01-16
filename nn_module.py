@@ -22,6 +22,7 @@ from torchdyn.nn import *
 
 from dgl.nn import NNConv
 from dgl.nn import TAGConv
+from egnn_pytorch import EGNN
 
 
 def cubic_kernel(r, re):
@@ -91,10 +92,10 @@ class SmoothConvLayerNew(nn.Module):
                  in_node_feats,
                  in_edge_feats,
                  out_node_feats,
-                 hidden_dim=128,
+                 hidden_dim=64,
                  activation='relu',
-                 #drop_edge=True,
-                 drop_edge=False,
+                 drop_edge=True,
+                 #drop_edge=False,
                  update_edge_emb=False):
 
         super(SmoothConvLayerNew, self).__init__()
@@ -166,7 +167,7 @@ class SmoothConvBlockNew(nn.Module):
                  out_node_feats,
                  hidden_dim=128,
                  conv_layer=2,  # at some point try with 3
-                 edge_emb_dim=64,
+                 edge_emb_dim=32,
                  use_layer_norm=False,
                  use_batch_norm=False, ##changed it
                  drop_edge=False,
@@ -277,17 +278,17 @@ class RBFExpansion(nn.Module):
 
 class SimpleMDNetNew(nn.Module):  # no bond, no learnable node encoder
     def __init__(self,
-                 encoding_size,
-                 out_feats,
-                 box_size,   # can also be array
-                 hidden_dim=128,
-                 conv_layer=4,
-                 edge_embedding_dim=256,
-                 dropout=0.1,
-                 drop_edge=True,
-                 use_layer_norm=False):
+                encoding_size,
+                out_feats,
+                box_size,   # can also be array
+                hidden_dim=128,
+                conv_layer=2,
+                edge_embedding_dim=32,
+                dropout=0.1,
+                drop_edge=True,
+                use_layer_norm=False):
         super(SimpleMDNetNew, self).__init__()
-        """
+
         self.graph_conv = SmoothConvBlockNew(in_node_feats=encoding_size,
                                              out_node_feats=encoding_size,
                                              hidden_dim=hidden_dim,
@@ -297,7 +298,6 @@ class SimpleMDNetNew(nn.Module):  # no bond, no learnable node encoder
                                              use_batch_norm=not use_layer_norm,
                                              drop_edge=drop_edge,
                                              activation='silu')
-        """
 
         self.edge_emb_dim = edge_embedding_dim
         self.edge_expand = RBFExpansion(high=1, gap=0.025)
@@ -313,11 +313,11 @@ class SimpleMDNetNew(nn.Module):  # no bond, no learnable node encoder
             self.box_size = box_size
         self.box_size = self.box_size
 
-        self.node_encoder = MLP(3, 256, hidden_layer=2, hidden_dim=hidden_dim, activation='leaky_relu')
-        self.node_dencoder = MLP(256, 3, hidden_layer=2, hidden_dim=hidden_dim, activation='leaky_relu')
-        #self.edge_encoder = MLP(3 + 1 + len(self.edge_expand.centers), self.edge_emb_dim, hidden_dim=hidden_dim,
-        #                        activation='gelu')
-        #self.edge_layer_norm = nn.LayerNorm(self.edge_emb_dim)
+        self.node_encoder = MLP(3, 32, hidden_layer=1, hidden_dim=32, activation='leaky_relu')
+        #self.node_dencoder = MLP(64, 3, hidden_layer=2, hidden_dim=hidden_dim, activation='leaky_relu')
+        self.edge_encoder = MLP(3 + 1 + len(self.edge_expand.centers), self.edge_emb_dim, hidden_dim=hidden_dim,
+                                activation='leaky_relu')
+        self.edge_layer_norm = nn.LayerNorm(self.edge_emb_dim)
         #self.graph_decoder = MLP(encoding_size, out_feats, hidden_layer=2, hidden_dim=hidden_dim, activation='gelu')
         self.save_index = 0
 
@@ -325,14 +325,21 @@ class SimpleMDNetNew(nn.Module):  # no bond, no learnable node encoder
         # with TAGConv
 
 
-        self.graph_e_1 = TAGConv(256, 512, activation=nn.ReLU())
-        self.graph_d_1 = TAGConv(512, 256, activation=nn.ReLU())
-        self.graph_e_2 = TAGConv(512, 256, activation=nn.GELU())
-        self.graph_d_2 = TAGConv(256, 512, activation=nn.GELU())
+        #self.graph_e_1 = TAGConv(3, 256, activation=nn.ReLU())
+        #self.graph_d_1 = TAGConv(256, 3, activation=nn.ReLU())
+        #self.graph_e_2 = TAGConv(256, 128, activation=nn.GELU())
+        #self.graph_d_2 = TAGConv(128, 256, activation=nn.GELU())
         #self.graphMLP1 = MLP(128, 64, activation_first=True, hidden_layer=3, hidden_dim=hidden_dim, activation = 'tanh')
         #self.graphMLP2 = MLP(64, 128, activation_first=True, hidden_layer=3, hidden_dim=hidden_dim, activation = 'tanh')
-        self.graph_e_3 = TAGConv(256, 32, activation=nn.GELU())
-        self.graph_d_3 = TAGConv(32, 256, activation=nn.GELU())
+        #self.graph_e_3 = TAGConv(128, encoding_size, activation=nn.GELU())
+        #self.graph_d_3 = TAGConv(32, 128, activation=nn.GELU())
+
+        self.decode_MLP = MLP(encoding_size, 3, hidden_layer=3, hidden_dim=32, activation='leaky_relu')
+        self.norm = nn.LayerNorm(encoding_size)
+        
+        #self.layer1 = EGNN(dim = 128)
+
+        # (1, 16, 512), (1, 16, 3)
 
 
     def calc_edge_feat(self,
@@ -377,11 +384,11 @@ class SimpleMDNetNew(nn.Module):  # no bond, no learnable node encoder
         neigh_idx = fluid_edge_idx[1, :]
         fluid_graph = dgl.graph((neigh_idx, center_idx))
         
-        #fluid_edge_feat = self.calc_edge_feat(center_idx, neigh_idx, fluid_pos)
-        #fluid_edge_emb = self.edge_layer_norm(self.edge_encoder(fluid_edge_feat))  # [edge_num, 64]
-        #fluid_edge_emb = self.edge_encoder(fluid_edge_feat)  # [edge_num, 64]
-        #fluid_edge_emb = self.edge_drop_out(fluid_edge_emb)
-        #fluid_graph.edata['e'] = fluid_edge_emb
+        fluid_edge_feat = self.calc_edge_feat(center_idx, neigh_idx, fluid_pos)
+        fluid_edge_emb = self.edge_layer_norm(self.edge_encoder(fluid_edge_feat))  # [edge_num, 64]
+        fluid_edge_emb = self.edge_encoder(fluid_edge_feat)  # [edge_num, 64]
+        fluid_edge_emb = self.edge_drop_out(fluid_edge_emb)
+        fluid_graph.edata['e'] = fluid_edge_emb
         
 
 
@@ -426,11 +433,19 @@ class SimpleMDNetNew(nn.Module):  # no bond, no learnable node encoder
         self.length_scaler.partial_fit(length)
 
     def gencoder_mine(self, h: torch.Tensor, g: dgl.DGLGraph):
+        """
         x = self.graph_e_1(g, h)
         x = self.graph_e_2(g, x)
         x = self.graph_e_3(g, x)
         #x = self.graphMLP1(x)
         return x
+        """
+        out = self.graph_conv(h, g)
+        out = self.norm(out)
+        return out
+
+    ### open to different autoencing techniques - currently using GAMD
+    ## tried with the ones mentioned in the paper, but they do something else
      
 
     def gdecoder_mine(self, h: torch.Tensor, g: dgl.DGLGraph):
@@ -439,8 +454,13 @@ class SimpleMDNetNew(nn.Module):  # no bond, no learnable node encoder
         x = self.graph_d_3(g,h)
         x = self.graph_d_2(g,x)
         x1 = self.graph_d_1(g,x)
-        x = self.node_dencoder(x1)
+        #x = self.node_dencoder(x1)
+        x = x1
         return x, x1
+
+    def gdecoder_MLP(self, h: torch.Tensor):
+        out = self.decode_MLP(h)
+        return h, out
 
     
 
@@ -456,11 +476,12 @@ class SimpleMDNetNew(nn.Module):  # no bond, no learnable node encoder
         old_graph_nodes = fluid_graph.ndata['e']
 
         g_embed = self.gencoder_mine(fluid_graph.ndata['e'], fluid_graph)
-        fluid_graph.ndata['e'], new_graph_nodes = self.gdecoder_mine(g_embed, fluid_graph)
+        #fluid_graph.ndata['e'], new_graph_nodes = self.gdecoder_mine(g_embed, fluid_graph)
         #pos = self.node_dencoder(fluid_graph.ndata['e'])
-        pos = fluid_graph.ndata['e']
+        emb, pos = self.gdecoder_MLP(g_embed)
+        #pos = fluid_graph.ndata['e']
 
-        return pos, old_graph_nodes, new_graph_nodes, g_embed
+        return pos, g_embed # old_graph_nodes, new_graph_nodes
         #return pos
 
 

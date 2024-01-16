@@ -74,7 +74,7 @@ class Some_seq_data(Dataset):
     def __init__(self, seed_num, device='cuda'):
         self.device = device
         self.seed_num = seed_num
-        all_files = np.arange(0, 1000)
+        all_files = np.arange(0, 500)
 
         ## self.rng = np.random.RandomState(891374)
         ## np.random.RandomState(125487).shuffle(all_files)
@@ -110,8 +110,8 @@ class Some_seq_data(Dataset):
         return all_x, all_t, all_y
 
     def get_it(self, seed_num, idxs):
-        PATH = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/autoencoder_for_graphs_withpos_and_no_reg_just_rec_loss/checkpoint_29.ckpt'
-        SCALER_CKPT = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/autoencoder_for_graphs_withpos_and_no_reg_just_rec_loss/scaler_29.npz'
+        PATH = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/autoencoder_prvipravi/checkpoint_29.ckpt'
+        SCALER_CKPT = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/autoencoder_prvipravi/scaler_29.npz'
         args = SimpleNamespace(use_layer_norm=False,
                             encoding_size=256,
                             hidden_dim=128,
@@ -122,7 +122,7 @@ class Some_seq_data(Dataset):
                             update_edge=False,
                             use_part=False,
                             data_dir='',
-                            loss='mae')
+                            loss='mse')
         model = ParticleNetLightning(args).load_from_checkpoint(PATH, args=args)
         model.load_training_stats(SCALER_CKPT)
         model.cuda()
@@ -134,7 +134,7 @@ class Some_seq_data(Dataset):
 
         for i in idxs:
 
-            data = np.load(f'md_dataset/lj_data/data_{seed_num}_{i}.npz')
+            data = np.load(f'md_dataset/lj_data/data_{seed_num}_{i+500}.npz')
             pos_data = data['pos']
             pos_hopefully_same, graph1, graph2, embed, force = model.predict_nextpos(pos_data)
             embed_lst[j] = embed
@@ -188,6 +188,44 @@ class just_a_sequence(Dataset):
         PATH = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/autoencoder_prvipravi/checkpoint_29.ckpt'
         SCALER_CKPT = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/autoencoder_prvipravi/scaler_29.npz'
         args = SimpleNamespace(use_layer_norm=False,
+                            encoding_size=32,
+                            hidden_dim=128,
+                            edge_embedding_dim=32,
+                            drop_edge=True,
+                            conv_layer=4,
+                            rotate_aug=False,
+                            update_edge=False,
+                            use_part=False,
+                            data_dir='',
+                            loss='mse')
+        model = ParticleNetLightning(args).load_from_checkpoint(PATH, args=args)
+        model.load_training_stats(SCALER_CKPT)
+        model.cuda()
+        model.eval()
+
+        embed_lst = [0]*len(idxs)
+
+        j=0
+
+        with torch.no_grad():
+            for i in idxs:
+
+                data = np.load(f'md_dataset/lj_data/data_{seed_num}_{i+500}.npz')
+                pos_data = data['pos']
+                #pos_hopefully_same, graph1, graph2, embed, force = model.predict_nextpos(pos_data)
+                pred, emb = model.predict_nextpos(pos_data)
+                embed_lst[j] = emb
+                j=j+1
+
+        #return brand_new_data
+        embed_numpy = [tensor.detach().cpu().numpy() for tensor in embed_lst]
+
+        return embed_numpy
+
+    def get_molecule_by_molecule(self, seed_num, idxs):
+        PATH = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/autoencoder_prvipravi/checkpoint_29.ckpt'
+        SCALER_CKPT = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/autoencoder_prvipravi/scaler_29.npz'
+        args = SimpleNamespace(use_layer_norm=False,
                             encoding_size=256,
                             hidden_dim=128,
                             edge_embedding_dim=1,
@@ -220,6 +258,7 @@ class just_a_sequence(Dataset):
         embed_numpy = [tensor.detach().cpu().numpy() for tensor in embed_lst]
 
         return embed_numpy
+
 
     """
     ## for the gamd-like autoencoder

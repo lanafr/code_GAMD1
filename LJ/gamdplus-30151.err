@@ -1,39 +1,0 @@
-2023-12-25 20:14:25.378235: I external/xla/xla/service/service.cc:168] XLA service 0x7089320 initialized for platform Interpreter (this does not guarantee that XLA will be used). Devices:
-2023-12-25 20:14:25.378363: I external/xla/xla/service/service.cc:176]   StreamExecutor device (0): Interpreter, <undefined>
-2023-12-25 20:14:25.385052: I external/xla/xla/pjrt/tfrt_cpu_pjrt_client.cc:218] TfrtCpuClient created.
-2023-12-25 20:14:25.770901: I external/xla/xla/service/service.cc:168] XLA service 0x6fe34c0 initialized for platform CUDA (this does not guarantee that XLA will be used). Devices:
-2023-12-25 20:14:25.770938: I external/xla/xla/service/service.cc:176]   StreamExecutor device (0): NVIDIA A40, Compute Capability 8.6
-2023-12-25 20:14:25.771278: I external/xla/xla/pjrt/gpu/se_gpu_pjrt_client.cc:198] Using BFC allocator.
-2023-12-25 20:14:25.771317: I external/xla/xla/pjrt/gpu/gpu_helpers.cc:105] XLA backend allocating 35730898944 bytes on device 0 for BFCAllocator.
-2023-12-25 20:14:28.700280: I external/xla/xla/stream_executor/cuda/cuda_dnn.cc:424] Loaded cuDNN version 8500
-2023-12-25 20:14:28.740218: I external/xla/xla/stream_executor/cuda/cuda_asm_compiler.cc:52] Using nvlink for parallel linking
-wandb: Currently logged in as: lana4655 (literallythehardestprojectever). Use `wandb login --relogin` to force relogin
-wandb: wandb version 0.16.1 is available!  To upgrade, please run:
-wandb:  $ pip install wandb --upgrade
-wandb: Tracking run with wandb version 0.15.5
-wandb: Run data is saved locally in /home/guests/lana_frkin/GAMDplus/code/LJ/wandb/run-20231225_201440-ong380y1
-wandb: Run `wandb offline` to turn off syncing.
-wandb: Syncing run Sequential model
-wandb: ⭐️ View project at https://wandb.ai/literallythehardestprojectever/NeuralODE%20jej
-wandb: 🚀 View run at https://wandb.ai/literallythehardestprojectever/NeuralODE%20jej/runs/ong380y1
-WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
-WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
-WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
-WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
-WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
-WARNING:absl:Using a deprecated code path to create / update neighbor lists. It will be removed in a later version of JAX MD. Using `neighbor_fn.allocate` and `neighbor_fn.update` is preferred.
-wandb: Waiting for W&B process to finish... (failed 1). Press Control-C to abort syncing.
-wandb: - 0.011 MB of 0.011 MB uploaded (0.000 MB deduped)wandb: \ 0.011 MB of 0.011 MB uploaded (0.000 MB deduped)wandb: | 0.011 MB of 0.011 MB uploaded (0.000 MB deduped)wandb: / 0.011 MB of 0.011 MB uploaded (0.000 MB deduped)wandb: - 0.011 MB of 0.011 MB uploaded (0.000 MB deduped)wandb: 🚀 View run Sequential model at: https://wandb.ai/literallythehardestprojectever/NeuralODE%20jej/runs/ong380y1
-wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
-wandb: Find logs at: ./wandb/run-20231225_201440-ong380y1/logs
-Traceback (most recent call last):
-  File "entire_network.py", line 142, in <module>
-    loss = nn.MSELoss(trajectory_real, trajectory_model)
-  File "/home/guests/lana_frkin/GAMDplus/code/LJ/GAMDnew/lib/python3.8/site-packages/torch/nn/modules/loss.py", line 533, in __init__
-    super(MSELoss, self).__init__(size_average, reduce, reduction)
-  File "/home/guests/lana_frkin/GAMDplus/code/LJ/GAMDnew/lib/python3.8/site-packages/torch/nn/modules/loss.py", line 23, in __init__
-    self.reduction: str = _Reduction.legacy_get_string(size_average, reduce)
-  File "/home/guests/lana_frkin/GAMDplus/code/LJ/GAMDnew/lib/python3.8/site-packages/torch/nn/_reduction.py", line 35, in legacy_get_string
-    if size_average and reduce:
-ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
-2023-12-25 20:15:00.487763: I external/xla/xla/pjrt/tfrt_cpu_pjrt_client.cc:221] TfrtCpuClient destroyed.

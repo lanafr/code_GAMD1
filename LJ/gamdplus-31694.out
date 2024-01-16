@@ -1,0 +1,80 @@
+['/home/guests/lana_frkin/GAMDplus/code/LJ', '/opt/python/3.8.10/lib/python38.zip', '/opt/python/3.8.10/lib/python3.8', '/opt/python/3.8.10/lib/python3.8/lib-dynload', '/home/guests/lana_frkin/GAMDplus/code/LJ/GAMDnew/lib/python3.8/site-packages', '/home/guests/lana_frkin/GAMDplus/code', '/home/guests/lana_frkin/GAMDplus/code', '/home/guests/lana_frkin/GAMDplus/code', '/home/guests/lana_frkin/GAMDplus/code/LJ']
+['/home/guests/lana_frkin/GAMDplus/code/LJ', '/opt/python/3.8.10/lib/python38.zip', '/opt/python/3.8.10/lib/python3.8', '/opt/python/3.8.10/lib/python3.8/lib-dynload', '/home/guests/lana_frkin/GAMDplus/code/LJ/GAMDnew/lib/python3.8/site-packages', '/home/guests/lana_frkin/GAMDplus/code', '/home/guests/lana_frkin/GAMDplus/code', '/home/guests/lana_frkin/GAMDplus/code', '/home/guests/lana_frkin/GAMDplus/code/LJ', '/home/guests/lana_frkin/GAMDplus/code/LJ/../', '/home/guests/lana_frkin/GAMDplus/code/LJ/../', '/home/guests/lana_frkin/GAMDplus/code/LJ/../', '/home/guests/lana_frkin/GAMDplus/code', '/home/guests/lana_frkin/GAMDplus/code', '/home/guests/lana_frkin/GAMDplus/code', '/home/guests/lana_frkin/GAMDplus/code/LJ']
+Using following set of hyper-parameters
+{'encoding_size': 32, 'out_feats': 3, 'hidden_dim': 128, 'edge_embedding_dim': 32, 'conv_layer': 4, 'drop_edge': True, 'use_layer_norm': False, 'box_size': 27.27}
+Using MLP with no hidden layer and activations! Fall back to nn.Linear()
+Using following set of hyper-parameters
+{'encoding_size': 32, 'out_feats': 3, 'hidden_dim': 128, 'edge_embedding_dim': 32, 'conv_layer': 4, 'drop_edge': True, 'use_layer_norm': False, 'box_size': 27.27}
+Using MLP with no hidden layer and activations! Fall back to nn.Linear()
+Using following set of hyper-parameters
+{'encoding_size': 32}
+Using following set of hyper-parameters
+{'encoding_size': 32}
+torch.Size([399, 258, 32])
+Loss is:
+[[ 0.          0.          0.         ...  0.          0.
+   0.        ]
+ [ 0.10939443  0.24953023  0.26649935 ...  0.12007822  0.17125292
+   0.10262059]
+ [ 0.21619563  0.43100721  0.46122843 ...  0.24328299  0.35738473
+   0.15912211]
+ ...
+ [10.43863501  6.30034694 11.63392071 ...  9.09977168  3.37475219
+   7.15843888]
+ [10.25284757  6.49471918 11.59786236 ...  9.1610073   3.39573773
+   7.12078264]
+ [10.05725058  6.68504884 11.59460458 ...  9.24157233  3.40771677
+   7.06681185]]
+Difference is:
+[[[ 0.00000000e+00  0.00000000e+00  0.00000000e+00]
+  [ 0.00000000e+00  0.00000000e+00  0.00000000e+00]
+  [ 0.00000000e+00  0.00000000e+00  0.00000000e+00]
+  ...
+  [ 0.00000000e+00  0.00000000e+00  0.00000000e+00]
+  [ 0.00000000e+00  0.00000000e+00  0.00000000e+00]
+  [ 0.00000000e+00  0.00000000e+00  0.00000000e+00]]
+
+ [[-1.75039291e-01  1.39056444e-02  7.11990595e-02]
+  [ 3.66549253e-01 -9.55119133e-02  2.08122849e-01]
+  [ 3.04864645e-01 -5.44648468e-02 -3.42281818e-01]
+  ...
+  [-3.61793041e-02  1.65543318e-01  1.20593548e-01]
+  [-2.43076801e-01  1.61020517e-01  5.44862747e-02]
+  [ 1.72725201e-01  2.43675113e-02 -3.41348648e-02]]
+
+ [[-3.56878519e-01  9.73892212e-03  1.12980187e-01]
+  [ 6.26161575e-01 -2.78207779e-01  2.96350718e-01]
+  [ 4.58128691e-01 -1.23024099e-01 -6.42789364e-01]
+  ...
+  [-1.08263254e-01  3.27010393e-01  2.42699623e-01]
+  [-4.96770382e-01  3.62161636e-01  7.23164082e-02]
+  [ 2.67390728e-01  4.58349884e-02 -4.85889912e-02]]
+
+ ...
+
+ [[ 1.49982047e+00 -1.71861873e+01 -5.41117442e+00]
+  [-9.94139481e+00  1.30194378e+00 -4.30775189e+00]
+  [ 1.07370296e+01 -1.59004651e+01  6.15919948e+00]
+  ...
+  [-7.95597982e+00  9.32291079e+00  9.90975547e+00]
+  [-2.15880370e+00  5.38774347e+00  6.91840887e-01]
+  [ 2.77905846e+00 -1.20818269e+01 -1.89826012e-01]]
+
+ [[ 1.44312716e+00 -1.68247375e+01 -5.49620235e+00]
+  [-1.02517095e+01  1.67378092e+00 -4.31799054e+00]
+  [ 1.07075000e+01 -1.58245670e+01  6.20191574e+00]
+  ...
+  [-7.93240404e+00  9.48007572e+00  9.94873333e+00]
+  [-2.15766716e+00  5.40074277e+00  8.77242327e-01]
+  [ 2.83751416e+00 -1.19998839e+01 -2.60645866e-01]]
+
+ [[ 1.37747478e+00 -1.64485583e+01 -5.56707823e+00]
+  [-1.05670147e+01  1.96625209e+00 -4.30600595e+00]
+  [ 1.07223232e+01 -1.57737136e+01  6.28699541e+00]
+  ...
+  [-7.93721199e+00  9.63832462e+00  1.00161541e+01]
+  [-2.16093254e+00  5.39224327e+00  1.04483676e+00]
+  [ 2.85953188e+00 -1.18986222e+01 -2.55651236e-01]]]
+258
+258
+Finished

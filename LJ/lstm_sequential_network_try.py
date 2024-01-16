@@ -62,11 +62,10 @@ def build_model(args, ckpt=None):
     print("Using following set of hyper-parameters")
     print(param_dict)
 
-    encoding_size = args.encoding_size
-
-    func = f1(encoding_size)
+    res = True
+    cont = True
     
-    model = ODEBlock(func)
+    model = MODEL(res=res, cont=cont)
 
     model.cuda()
 
@@ -99,14 +98,32 @@ class Learner(pl.LightningModule):
 
         dataset = []
 
-        n=499
+        # data dim [timestamps, batch, channels (derivatives), feature dimension]
+
+        n=100
 
         for i in range(9):
-            X_train = torch.Tensor(just_a_sequence(i).train_x[0:n]).to(device)
+            X_train = torch.Tensor(just_a_sequence(2).train_x[0:n]).to(device)
             #for j in range(258):
             #    dataset.append(X_train[:, j, :])
-            #X_train = torch.rand((2,258,32))
-            dataset.append(X_train)
+
+            timestamps = X_train.size()[0]
+            batch_size = 1
+            channels = X_train.size()[1]  # For example, representing different derivatives
+            feature_dim = X_train.size()[2]
+
+            # Create a tensor with random values
+            tensor_shape = (timestamps, batch_size, channels, feature_dim)
+            new_X = torch.zeros(tensor_shape)
+
+            integration_time = torch.arange(X_train.size()[0]).to(device)
+            integration_time = integration_time.float()
+
+            new_X[:,0] = integration_time
+            new_X[:,2] = X_train[:,1]
+            new_X[:,3] = X_train[:,2]
+
+            dataset.append(new_X)
 
         return DataLoader(dataset, batch_size=1, shuffle=True, pin_memory=False)
 
@@ -119,12 +136,15 @@ class Learner(pl.LightningModule):
         for i in range (len(batch)):
             x = batch[i]
 
-            integration_time = torch.arange(x.size()[0]).to(device)
-            integration_time = integration_time.float()
+            x[:,1] = batch_idx
 
-            print("Hejhej friend")
+            tensor_shape = (x.shape()[0], 1)
+            t = torch.zeros(tensor_shape)
+            t[:,0] = x[:,0]
+            t[:,1] = x[:,1]
 
-            y_hat = self.model(x[0], integration_time)
+
+            y_hat = self.model(x, t)
 
             one_loss = nn.MSELoss()(y_hat, x)
 
@@ -145,8 +165,28 @@ class Learner(pl.LightningModule):
         dataset = []
 
         for i in range(1):
-            X_val = torch.Tensor(just_a_sequence(9).train_x[0:499]).to(device)
+            X_val = torch.Tensor(just_a_sequence(2).train_x[0:100]).to(device)
             dataset.append(X_val)
+
+            timestamps = X_val.size()[0]
+            batch_size = 1
+            channels = X_val.size()[1]  # For example, representing different derivatives
+            feature_dim = X_val.size()[2]
+
+            # Create a tensor with random values
+            tensor_shape = (timestamps, batch_size, channels, feature_dim)
+            new_X = torch.zeros(tensor_shape)
+            print(new_X[:,0].size())
+            print(new_X[:,...].size())
+
+            integration_time = torch.arange(X_val.size()[0]).to(device)
+            integration_time = integration_time.float()
+
+            new_X[:,0] = integration_time
+            new_X[:,2] = X_train[:,1]
+            new_X[:,3] = X_train[:,2]
+
+            dataset.append(new_X)
 
         return DataLoader(dataset, batch_size=1, shuffle = True, pin_memory=False)
 
@@ -155,20 +195,18 @@ class Learner(pl.LightningModule):
 
         with torch.no_grad():
             x = batch[0]
-            loss = 0
-            """ for  molecule by molecule
-            for i in range(258):
-                integration_time = torch.arange(x.size()[0]).to("cuda")
-                integration_time = integration_time.float()
-                y_hat = self.model(x[:,i,:][0], integration_time)
-                one_loss = nn.MSELoss()(y_hat,x[:,i,:])
-                loss = loss + one_loss
-            """
-            integration_time = torch.arange(x.size()[0]).to("cuda")
-            integration_time = integration_time.float()
-            y_hat = self.model(x[0], integration_time)
-            one_loss = nn.MSELoss()(y_hat,x)
-            loss = loss + one_loss
+
+            x[:,1] = batch_idx
+
+            tensor_shape = (x.shape()[0], 1)
+            t = torch.zeros(tensor_shape)
+            t[:,0] = x[:,0]
+            t[:,1] = x[:,1]
+
+
+            y_hat = self.model(x, t)
+
+            one_loss = nn.MSELoss()(y_hat, x)
 
             #loss = loss/x.size()[0]
 
@@ -182,7 +220,7 @@ class Learner(pl.LightningModule):
 
     def configure_optimizers(self):
         optim = torch.optim.Adam(self.parameters(), lr=0.001)
-        sched = StepLR(optim, step_size=20, gamma=0.001**(10/500)) ## changed 5 to 10
+        sched = StepLR(optim, step_size=10, gamma=0.001**(10/500)) ## changed 5 to 10
         return [optim], [sched]
 
 class ModelCheckpointAtEpochEnd(pl.Callback):
@@ -216,98 +254,66 @@ class ModelCheckpointAtEpochEnd(pl.Callback):
             np.savez(scaler_filename)
             # joblib.dump(pl_module.train_data_scaler, scaler_filename)
 
-class f1(nn.Module):
-    def __init__(self, encoding_size):
+class tempf(nn.Module):
+    def __init__(self, in_channels, out_channels):
         super().__init__()
-        nhidden = 512
-        self.actv = nn.Softplus()
-        self.dense1 = nn.Linear(encoding_size, 256)
-        self.dense2 = nn.Linear(256, nhidden)
-        self.dense3 = nn.Linear(nhidden, nhidden)
-        self.dense4 = nn.Linear(nhidden, nhidden)
-        self.dense5 = nn.Linear(nhidden, 256)
-        self.dense6 = nn.Linear(256, encoding_size)
-        self.dense7 = nn.Linear(encoding_size, 256)
-        self.dense8 = nn.Linear(256, nhidden)
-        self.dense9 = nn.Linear(nhidden, nhidden)
-        self.dense10 = nn.Linear(nhidden, nhidden)
-        self.dense11 = nn.Linear(nhidden, 256)
-        self.dense12 = nn.Linear(256, encoding_size)
-        """
-        self.dense13 = nn.Linear(encoding_size, 256)
-        self.dense14 = nn.Linear(256, nhidden)
-        self.dense15 = nn.Linear(nhidden, nhidden)
-        self.dense16 = nn.Linear(nhidden, nhidden)
-        self.dense17 = nn.Linear(nhidden, 256)
-        self.dense18 = nn.Linear(256, encoding_size)
-        #nn.init.normal_(self.dense14.weight.data, 0.0, 0.0)
-        #nn.init.normal_(self.dense14.bias.data, 0.0, 0.0)
-        """
-    
-        
+        self.actv = nn.Tanh()
+        self.dense1 = nn.Linear(in_channels, in_channels)
+        self.dense2 = nn.Linear(in_channels, out_channels)
+        # self.dense3 = nn.Linear(out_channels, out_channels)
 
-
-    def forward(self, t, x):
+    def forward(self, h, x):
         out = self.dense1(x)
         out = self.actv(out)
         out = self.dense2(out)
         out = self.actv(out)
-        out = self.dense3(out)
-        out = self.actv(out)
-        out = self.dense4(out)
-        out = self.actv(out)
-        out = self.dense5(out)
-        out = self.actv(out)
-        out = self.dense6(out)
-        out = self.actv(out)
-        out = self.dense7(out)
-        out = self.actv(out)
-        out = self.dense8(out)
-        out = self.actv(out)
-        out = self.dense9(out)
-        out = self.actv(out)
-        out = self.dense10(out)
-        out = self.actv(out)
-        out = self.dense11(out)
-        out = self.actv(out)
-        out = self.dense12(out)
-        """
-        out = self.actv(out)
-        out = self.dense13(out)
-        out = self.actv(out)
-        out = self.dense14(out)
-        out = self.actv(out)
-        out = self.dense15(out)
-        out = self.actv(out)
-        out = self.dense16(out)
-        out = self.actv(out)
-        out = self.dense17(out)
-        out = self.actv(out)
-        out = self.dense18(out)
-        """
+        # out = self.dense3(out)
         return out
 
-class ODEBlock(nn.Module):
 
-    def __init__(self, odefunc):
-        super(ODEBlock, self).__init__()
-        self.odefunc = odefunc
+class temprnn(nn.Module):
+    def __init__(self, in_channels, out_channels, nhidden, res=False, cont=False):
+        super().__init__()
+        self.actv = nn.Tanh()
+        self.dense1 = nn.Linear(in_channels + 2 * nhidden, 2 * nhidden)
+        self.dense2 = nn.Linear(2 * nhidden, 2 * nhidden)
+        self.dense3 = nn.Linear(2 * nhidden, 2 * out_channels)
+        self.cont = cont
+        self.res = res
 
-    def forward(self, x, integration_time):
-        out = odeint(self.odefunc, x, integration_time, solver = 'rk4', atol=1e-6, rtol=1e-6)
-        #out = odeint_adjoint(self.odefunc, x, integration_time, atol=1e-3, rtol=1e-3)
-        #print(out.size())
-        #print(out[1].size())
-        return out[1]
-        #return out
+    def forward(self, h, x):
+        print(h[:, 0].size())
+        print(x.size())
+        out = torch.cat([h[:, 0], h[:, 1], x], dim=1)
+        print(h[:, 0].size())
+        print(x.size())
+        out = self.dense1(out)
+        out = self.actv(out)
+        out = self.dense2(out)
+        out = self.actv(out)
+        out = self.dense3(out).reshape(h.shape)
+        out = out + h
+        return out
 
-    @property
-    def nfe(self):
-        return self.odefunc.nfe
 
-    @nfe.setter
-    def nfe(self, value):
-        self.odefunc.nfe = value
+class MODEL(nn.Module):
+    def __init__(self, res=False, cont=False):
+        super(MODEL, self).__init__()
+        nhid = 128
+        self.cell = HeavyBallNODE(tempf(nhid, nhid), corr=0, corrf=True)
+        # self.cell = HeavyBallNODE(tempf(nhid, nhid))
+        #self.try1 = NODEintegrate(self.cell)
+        self.rnn = temprnn(32, nhid, nhid, res=res, cont=cont)
+        self.ode_rnn = ODE_RNN_with_Grad_Listener(self.cell, self.rnn, (2, nhid), None, tol=1e-5)
+        self.outlayer = nn.Linear(nhid, 32)
+
+    def forward(self, x, t):
+        x = torch.tensor(x).to('cuda')
+        t = torch.tensor(t).to('cuda')
+        out = self.ode_rnn(t, x, retain_grad=True)[0]
+        #out = self.try1(t, x)
+        out = self.outlayer(out[:, :, 0])[1:]
+        return out
         
 
 def train_model(args):
@@ -350,8 +356,8 @@ def train_model(args):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--min_epoch', default=40, type=int)
-    parser.add_argument('--max_epoch', default=40, type=int)
+    parser.add_argument('--min_epoch', default=50, type=int)
+    parser.add_argument('--max_epoch', default=150, type=int)
     parser.add_argument('--lr', default=3e-4, type=float)
     parser.add_argument('--cp_dir', default='./model_ckpt/sequential_network_withprvipravi')
     parser.add_argument('--state_ckpt_dir', default=None, type=str)

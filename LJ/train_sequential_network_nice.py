@@ -35,7 +35,7 @@ from heavyballNODE import *
 import wandb
 
 seqlen = 64
-data = Some_seq_data(seqlen, 1)
+data = Some_seq_data(1)
 
 wandb.init(project="NeuralODE jej", name="Sequential model")
 

@@ -6,7 +6,7 @@
 #SBATCH --time=0-24:00:00  # Limit on the total run time (format: days-hours:minutes:seconds)
 #SBATCH --gres=gpu:1  # Number of GPUs if needed
 #SBATCH --cpus-per-task=8  # Number of CPUs (Don't use more than 24 per GPU)
-#SBATCH --mem=20G  # Memory in GB (Don't use more than 126G per GPU)
+#SBATCH --mem=25G  # Memory in GB (Don't use more than 126G per GPU)
 
 # load python module
 
@@ -48,9 +48,6 @@ export WANDB_API_KEY=75b2f740e6817e165e204770a9185c4c98ba649d
 
 #./install_gamd.sh
 
-
-
-
 # run the program
 #export CUDA_LAUNCH_BLOCKING=1.
 export PATH="/home/guests/lana_frkin/.local/bin:$PATH"
@@ -66,8 +63,10 @@ export PATH="/home/guests/lana_frkin/.local/bin:$PATH"
 #python train_sequential_network_nice.py
 #python seq_network_prev.py
 #python actual_gamd.py
-python entire_network.py
 #python the_sequential_network.py
+#python lstm_sequential_network_try.py
+python entire_network_test.py
+#python entire_network.py
 #python test_script/rdf_graph.py
 #python test_script/test_nosehoover.py
 #python train_network_lj.py  --batch_size=1 --encoding_size 8 --hidden_dim 8 --edge_embedding_dim 8 --loss mae --use_layer_norm
