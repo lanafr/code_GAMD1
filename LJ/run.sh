@@ -53,20 +53,9 @@ export WANDB_API_KEY=75b2f740e6817e165e204770a9185c4c98ba649d
 export PATH="/home/guests/lana_frkin/.local/bin:$PATH"
 #python train_network_lj.py # --cuda
 #python train_endtoend_autoencoder_nice.py
-#python train_autoencoder.py
 #python generate_graphs.py
 #python test_script/visualize_graph.py
-#jupyter execute test_script/lj.ipynb
-#python test_script/test_langevin.py
 #python generate_lj_data.py
-#python generate_lj_data_from_model.py
-#python train_sequential_network_nice.py
-#python seq_network_prev.py
-#python actual_gamd.py
 #python the_sequential_network.py
-#python lstm_sequential_network_try.py
 python entire_network_test.py
 #python entire_network.py
-#python test_script/rdf_graph.py
-#python test_script/test_nosehoover.py
-#python train_network_lj.py  --batch_size=1 --encoding_size 8 --hidden_dim 8 --edge_embedding_dim 8 --loss mae --use_layer_norm

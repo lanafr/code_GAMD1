@@ -15,20 +15,21 @@ import jax.numpy as jnp
 import cupy
 from pytorch_lightning.loggers import WandbLogger
 
+import dgl.nn
+import dgl.function as fn
+from dgl.ops import edge_softmax
+from dgl.utils import expand_as_pair
+
 sys.path.append(os.path.join(os.path.dirname(__file__), '../'))
 from nn_module import SimpleMDNetNew
 from train_utils import LJDataNew
 from graph_utils import NeighborSearcher, graph_network_nbr_fn
 import time
+
 # os.environ["CUDA_VISIBLE_DEVICES"] = "" # just to test if it works w/o gpu
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 #os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.75"
 #os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
-
-import dgl.nn
-import dgl.function as fn
-from dgl.ops import edge_softmax
-from dgl.utils import expand_as_pair
 
 # for water box
 CUTOFF_RADIUS = 7.5
@@ -385,7 +386,7 @@ def main():
     parser.add_argument('--min_epoch', default=25, type=int)
     parser.add_argument('--max_epoch', default=30, type=int)
     parser.add_argument('--lr', default=3e-4, type=float)
-    parser.add_argument('--cp_dir', default='./model_ckpt/autoencoder_prvipravi')
+    parser.add_argument('--cp_dir', default='./model_ckpt/autoencoder_pokusajdrugi')
     parser.add_argument('--state_ckpt_dir', default=None, type=str)
     parser.add_argument('--batch_size', default=4, type=int)
     parser.add_argument('--encoding_size', default=32, type=int)

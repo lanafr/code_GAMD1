@@ -14,7 +14,6 @@ sys.path.append('/home/guests/lana_frkin/GAMDplus/code/LJ')
 print(sys.path)
 
 from nn_module import SimpleMDNetNew_GAMD, SimpleMDNetNew
-from actual_gamd import ParticleNetLightning_GAMD, NUM_OF_ATOMS
 from train_endtoend_autoencoder_nice import ParticleNetLightning
 import torch
 import numpy as np
@@ -23,6 +22,8 @@ from types import SimpleNamespace
 import torch.nn as nn
 
 from einops import rearrange
+
+NUM_OF_ATOMS = 258
 
 class Sequential_data(Dataset):
     def __init__(self,
@@ -167,26 +168,15 @@ class just_a_sequence(Dataset):
     def __init__(self, seed_num, device='cuda'):
         self.device = device
         self.seed_num = seed_num
-        all_files = np.arange(0, 500)
+        idxs = np.arange(0, 500)
 
-        ## self.rng = np.random.RandomState(891374)
-        ## np.random.RandomState(125487).shuffle(all_files)
-        # 15% test set, 10% validation set, the rest is for training
-
-        #valid_n = int((1-0.15) * len(all_files))
-        #train_files = all_files[:valid_n]
-        #valid_files = all_files[valid_n:]
-
-        #self.train_x = self.get_it(seed_num, train_files)
-        #self.valid_x = self.get_it(seed_num, valid_files)
-
-        self.train_x = self.get_it(seed_num, all_files)
+        self.sequence = self.get_it(seed_num, idxs)
 
     
 
     def get_it(self, seed_num, idxs):
-        PATH = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/autoencoder_prvipravi/checkpoint_29.ckpt'
-        SCALER_CKPT = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/autoencoder_prvipravi/scaler_29.npz'
+        PATH = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/autoencoder_pokusajdrugi/checkpoint_29.ckpt'
+        SCALER_CKPT = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/autoencoder_pokusajdrugi/scaler_29.npz'
         args = SimpleNamespace(use_layer_norm=False,
                             encoding_size=32,
                             hidden_dim=128,

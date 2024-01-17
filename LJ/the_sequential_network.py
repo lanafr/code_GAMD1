@@ -21,21 +21,10 @@ from nn_module import SimpleMDNetNew
 from train_utils_seq import Sequential_data, Some_seq_data, just_a_sequence
 from graph_utils import NeighborSearcher, graph_network_nbr_fn
 import time
-os.environ["CUDA_VISIBLE_DEVICES"] = "0" # just to test if it works w/o gpu
-os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-#os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.75"
-#os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
 
-## try number 100
-
-import torch
 import torchcde
 
-from heavyballNODE import *
-
 import wandb
-
-wandb.init(project="NeuralODE jej", name="Sequential model")
 
 from torchdyn.core import NeuralODE
 from torchdyn.datasets import *
@@ -43,15 +32,14 @@ from torchdyn import *
 from torchdyn.models.hybrid import HybridNeuralDE
 from torchdyn.models import *
 
-import torch
 import torch.utils.data as data
+
+os.environ["CUDA_VISIBLE_DEVICES"] = "0" # just to test if it works w/o gpu
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+#os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.75"
+#os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
+
 device = torch.device("cuda") # all of this works in GPU as well :)
-
-import torch.nn as nn
-import pytorch_lightning as pl
-
-import torch
-import torch.nn as nn
 
 def build_model(args, ckpt=None):
 
@@ -102,7 +90,7 @@ class Learner(pl.LightningModule):
         n=499
 
         for i in range(9):
-            X_train = torch.Tensor(just_a_sequence(i).train_x[0:n]).to(device)
+            X_train = torch.Tensor(just_a_sequence(i).sequence[0:n]).to(device)
             #for j in range(258):
             #    dataset.append(X_train[:, j, :])
             #X_train = torch.rand((2,258,32))
@@ -145,7 +133,7 @@ class Learner(pl.LightningModule):
         dataset = []
 
         for i in range(1):
-            X_val = torch.Tensor(just_a_sequence(9).train_x[0:499]).to(device)
+            X_val = torch.Tensor(just_a_sequence(9).sequence[0:499]).to(device)
             dataset.append(X_val)
 
         return DataLoader(dataset, batch_size=1, shuffle = True, pin_memory=False)
@@ -322,6 +310,7 @@ def train_model(args):
     wandb_logger = WandbLogger()
     device = torch.device("cuda")
     torch.cuda.empty_cache()
+    wandb.init(project="NeuralODE jej", name="Sequential model")
 
     #lstm_cell = nn.LSTMCell(input_size=128, hidden_size=512).to(device)
 
@@ -353,7 +342,7 @@ def main():
     parser.add_argument('--min_epoch', default=40, type=int)
     parser.add_argument('--max_epoch', default=40, type=int)
     parser.add_argument('--lr', default=3e-4, type=float)
-    parser.add_argument('--cp_dir', default='./model_ckpt/sequential_network_withprvipravi')
+    parser.add_argument('--cp_dir', default='./model_ckpt/sequential_network_pokusajdrugi')
     parser.add_argument('--state_ckpt_dir', default=None, type=str)
     parser.add_argument('--batch_size', default=1, type=int)
     parser.add_argument('--encoding_size', default=32, type=int)

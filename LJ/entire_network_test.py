@@ -16,7 +16,6 @@ sys.path.append('/home/guests/lana_frkin/GAMDplus/code/LJ')
 print(sys.path)
 
 from nn_module import SimpleMDNetNew_GAMD, SimpleMDNetNew
-from actual_gamd import ParticleNetLightning_GAMD, NUM_OF_ATOMS
 from train_endtoend_autoencoder_nice import ParticleNetLightning
 import torch
 import numpy as np
@@ -50,16 +49,7 @@ def network_trajectory(start_pos,t):
 
     PATH2 = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/sequential_network_withprvipravi/checkpoint_39.ckpt'
     SCALER_CKPT2 = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/sequential_network_withprvipravi/scaler_39.npz'
-    args2 = SimpleNamespace(use_layer_norm=False,
-                        encoding_size=32,
-                        hidden_dim=128,
-                        drop_edge=False,
-                        conv_layer=4,
-                        rotate_aug=False,
-                        update_edge=False,
-                        use_part=False,
-                        data_dir='',
-                        loss='mse')
+    args2 = SimpleNamespace(encoding_size=32)
     model2 = Learner(args2).load_from_checkpoint(PATH2, args=args2)
     #model2.load_training_stats(SCALER_CKPT2)
     model2.cuda()
@@ -76,8 +66,6 @@ def network_trajectory(start_pos,t):
             
         next_embeddings = model2.ode_embed_func(embed,t-1)
 
-        print(next_embeddings.size())
-
         # next_embeddings = torch.stack(next_embeddings)
 
         trajectory = model.decode_the_sequence(next_embeddings, t-1)
@@ -88,7 +76,6 @@ def network_trajectory(start_pos,t):
 
 def rdf_func(coords, box_size, dr=0.1, r_max=None):
     num_particles = len(coords)
-    print(num_particles)
     if r_max is None:
         r_max = np.min(box_size) / 2.0  # Use half the minimum box size as a default
 
@@ -119,6 +106,10 @@ def rdf_func(coords, box_size, dr=0.1, r_max=None):
 
     return g_r, radii[:-1]  # Exclude the last bin edge for plotting
 
+num_particles = 258
+BOX_SIZE = 27.27
+box_size = np.array([BOX_SIZE, BOX_SIZE, BOX_SIZE])
+
 t_start = 500
 t = 400
 
@@ -140,21 +131,22 @@ trajectory_model = network_trajectory(start_pos, t)
 trajectory_real_np= np.stack(trajectory_real, axis=0)
 trajectory_model_np = np.stack(trajectory_model, axis=0)
 
-loss1 = ((trajectory_model_np-trajectory_real_np)**2).mean(axis=2)
+trajectory_model_np = np.mod(trajectory_model_np,BOX_SIZE)
+
+loss1 = ((trajectory_model_np-trajectory_real_np)**2)#.mean(axis=2)
 loss = np.sqrt(loss1)
 
 print("Loss is:")
 print(loss)
+print(loss1)
 
 print("Difference is:")
 print(trajectory_model_np-trajectory_real_np)
 
 
-num_particles = 258
-BOX_SIZE = 27.27
-box_size = np.array([BOX_SIZE, BOX_SIZE, BOX_SIZE])
-
 t_for_rdf = 399
+
+## for one time snapshot
 
 if (t_for_rdf>t): print("Time for rdf has to be smaller than t")
 
@@ -178,6 +170,53 @@ plt.plot(radii_model, g_r_model, label='Model Data')
 plt.xlabel('Distance')
 plt.ylabel('Radial Distribution Function (RDF)')
 plt.legend()
-plt.savefig('rdf_graph_both_399.png')
+plt.savefig('results_rdjgraphs/rdf_graph_both_399.png')
 
 print("Finished")
+
+"""
+
+## an average of multiple snapshots
+
+t_for_rdf = 100
+t_for_rdf_end = 399
+
+g_r_real_all = []
+g_r_model_all = []
+
+trajectory_real_np = np.mod(trajectory_real_np,BOX_SIZE)
+
+for i in range (t_for_rdf, t_for_rdf_end):
+    # Calculate RDF with periodic boundary conditions
+    g_r_real, radii_real = rdf_func(trajectory_real_np[i], box_size, dr=0.1)
+    g_r_real_all.append(g_r_real)
+
+g_r_real_average = np.mean(g_r_real_all, axis=0)
+
+
+# Plot RDF
+plt.plot(radii_real, g_r_real_average, label='Real Data')
+plt.xlabel('Distance')
+plt.ylabel('Average Radial Distribution Function (RDF)')
+plt.legend()
+#plt.savefig('rdf_graph_real.png')
+
+trajectory_model_np = np.mod(trajectory_model_np,BOX_SIZE)
+
+for i in range (t_for_rdf, t_for_rdf_end):
+    # Calculate RDF with periodic boundary conditions
+    g_r_model, radii_model = rdf_func(trajectory_model_np[i], box_size, dr=0.1)
+    g_r_model_all.append(g_r_model)
+
+g_r_model_average = np.mean(g_r_model_all, axis=0)
+
+# Plot RDF
+plt.plot(radii_model, g_r_model_average, label='Model Data')
+plt.xlabel('Distance')
+plt.ylabel('Average Radial Distribution Function (RDF)')
+plt.legend()
+plt.savefig('results_rdjgraphs/rdf_graph_average_100-399_otherdata.png')
+
+print("Finished")
+
+"""

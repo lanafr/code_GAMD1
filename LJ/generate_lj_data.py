@@ -51,7 +51,7 @@ def center_positions(pos):
 BOX_SCALE = 2
 DT = 2
 for seed in range(1):
-    print(f'Running seed: {seed}')
+    print(f'Running seed: {2}')
     P_NUM = 258
     fluid = testsystems.LennardJonesFluid(nparticles=P_NUM, reduced_density=0.50, shift=True)
     [topology, system, positions] = fluid.topology, fluid.system, fluid.positions
@@ -84,7 +84,7 @@ for seed in range(1):
     simulation.step(1)
 
     os.makedirs(f'./md_dataset/lj_data_to_test/', exist_ok=True)
-    dataReporter_gt = StateDataReporter(f'./log_nvt_lj_{seed}.txt', 50, totalSteps=50000,
+    dataReporter_gt = StateDataReporter(f'./log_nvt_lj_{2}.txt', 50, totalSteps=50000,
         step=True, time=True, speed=True, progress=True, elapsedTime=True, remainingTime=True,
         potentialEnergy=True, kineticEnergy=True, totalEnergy=True, temperature=True,
                                      separator='\t')
@@ -100,7 +100,7 @@ for seed in range(1):
         pos = state.getPositions(asNumpy=True).value_in_unit(unit.angstrom)
         vel = state.getVelocities(asNumpy=True).value_in_unit(unit.meter / unit.second)
         force = state.getForces(asNumpy=True).value_in_unit(unit.kilojoules_per_mole/unit.nanometer)
-        np.savez(f'./md_dataset/lj_data_to_test/data_{seed}_{t}.npz',
+        np.savez(f'./md_dataset/lj_data_to_test/data_{2}_{t}.npz',
                  pos=pos,
                  vel=vel,
                  forces=force)
