@@ -172,11 +172,19 @@ class just_a_sequence(Dataset):
 
         self.sequence = self.get_it(seed_num, idxs)
 
+        positions = []
+
+        for i in idxs:
+            data = np.load(f'md_dataset/lj_data/data_{seed_num}_{i+500}.npz')
+            pos_data = data['pos']
+            positions.append(pos_data)
+
+        self.positions = positions
     
 
     def get_it(self, seed_num, idxs):
-        PATH = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/autoencoder_pokusajdrugi/checkpoint_29.ckpt'
-        SCALER_CKPT = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/autoencoder_pokusajdrugi/scaler_29.npz'
+        PATH = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/autoencoder_velocities_works?/checkpoint_29.ckpt'
+        SCALER_CKPT = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/autoencoder_velocities_works?/scaler_29.npz'
         args = SimpleNamespace(use_layer_norm=False,
                             encoding_size=32,
                             hidden_dim=128,
@@ -202,8 +210,9 @@ class just_a_sequence(Dataset):
 
                 data = np.load(f'md_dataset/lj_data/data_{seed_num}_{i+500}.npz')
                 pos_data = data['pos']
+                vel_data = data['vel']
                 #pos_hopefully_same, graph1, graph2, embed, force = model.predict_nextpos(pos_data)
-                pred, emb = model.predict_nextpos(pos_data)
+                pred, emb, vel = model.embed_pos(pos_data, vel_data)
                 embed_lst[j] = emb
                 j=j+1
 
@@ -213,8 +222,8 @@ class just_a_sequence(Dataset):
         return embed_numpy
 
     def get_molecule_by_molecule(self, seed_num, idxs):
-        PATH = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/autoencoder_prvipravi/checkpoint_29.ckpt'
-        SCALER_CKPT = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/autoencoder_prvipravi/scaler_29.npz'
+        PATH = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/autoencoder_wellsee/checkpoint_29.ckpt'
+        SCALER_CKPT = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/autoencoder_wellsee/scaler_29.npz'
         args = SimpleNamespace(use_layer_norm=False,
                             encoding_size=256,
                             hidden_dim=128,
@@ -240,7 +249,7 @@ class just_a_sequence(Dataset):
             data = np.load(f'md_dataset/lj_data/data_{seed_num}_{i+500}.npz')
             pos_data = data['pos']
             #pos_hopefully_same, graph1, graph2, embed, force = model.predict_nextpos(pos_data)
-            pred, graphem1, graphem2, emb = model.predict_nextpos(pos_data)
+            pred, graphem1, graphem2, emb = model.embed_pos(pos_data)
             embed_lst[j] = emb
             j=j+1
 
@@ -248,6 +257,95 @@ class just_a_sequence(Dataset):
         embed_numpy = [tensor.detach().cpu().numpy() for tensor in embed_lst]
 
         return embed_numpy
+
+class sequence_of_pos(Dataset):
+    def __init__(self,
+            dataset_path,
+            sample_num,   # per seed
+            device='cuda',
+            split=(0.9, 0.1),
+            seed_num=10,
+            mode='train',):
+
+        self.device = device
+        self.seed_num = seed_num
+        self.dataset_path = dataset_path
+        self.sample_num = sample_num
+        self.case_prefix = 'data_'
+        self.seed_num = seed_num
+
+        self.mode = mode
+        assert mode in ['train', 'test']
+        #np.random.seed(0)   # fix same random seed: Setting a random seed ensures that the random shuffling of idxs will be the same every time you run your code, making your results reproducible.
+        seed_seq = [i for i in range(seed_num)]
+        ratio = split[0]
+        if mode == 'train':
+            self.index = seed_seq[:int(seed_num*ratio)]
+        else:
+            self.index = seed_seq[int(seed_num*ratio):]
+
+    def __getitem__(self, index):
+
+        data = []
+
+        data.append(self.get_sequence(index))
+
+        return data
+
+    def __len__(self):
+        return len(self.index)
+    
+
+    def get_sequence(self, index):
+        idxs = np.arange(0, 100)
+
+        pos_lst = []
+        vel_lst = []
+
+        for i in idxs:
+
+            current_pos = self.get_one(i, index)['pos']
+            pos_lst.append(current_pos)
+
+            current_vel = self.get_one(i, index)['vel']
+            vel_lst.append(current_vel)
+
+        dictionary = {'pos': pos_lst, 'vel': vel_lst}
+
+        return dictionary
+
+    def get_one(self, idx, seed, get_path_name=False):
+        
+        fname = f'data_{seed}_{idx+400}'#f'seed_{seed_to_read}_data_{sample_to_read}'
+        #fname = f'data_5_{idx+400}'#f'seed_{seed_to_read}_data_{sample_to_read}'
+        #fname_next = f'data_{seed+200}_{sample_to_read_next}'
+
+        #fname = f'data_6_555'
+        #fname_next = f'data_4_368'
+
+        data_path = os.path.join(self.dataset_path, fname)
+        #data_path_next = os.path.join(self.dataset_path, fname_next)
+
+        data = {}
+        with np.load(data_path + '.npz', 'rb') as raw_data:
+            pos = raw_data['pos'].astype(np.float32)
+            data['pos'] = pos
+            forces = raw_data['forces'].astype(np.float32)
+            data['forces'] = forces
+            vel = raw_data['vel'].astype(np.float32)
+            data['vel'] = vel
+            """
+        with np.load(data_path_next + '.npz', 'rb') as raw_data_next:
+            pos_next = raw_data_next['pos'].astype(np.float32)
+            data['pos_next'] = pos_next
+            forces_next = raw_data_next['forces'].astype(np.float32)
+            data['forces_next'] = forces_next
+            """
+
+        if get_path_name:
+            return data, data_path
+
+        return data
 
 
     """

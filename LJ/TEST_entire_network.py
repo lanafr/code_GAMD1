@@ -22,8 +22,6 @@ import numpy as np
 from torch.utils.data import DataLoader
 from types import SimpleNamespace
 import torch.nn as nn
-#from seqn_just1particle import Learner
-from the_sequential_network import Learner
 
 from einops import rearrange
 from scipy.spatial import cKDTree
@@ -31,9 +29,11 @@ from sklearn.metrics import mean_squared_error
 
 from mpl_toolkits.mplot3d import Axes3D
 
+from train_ENTIRE_NETWORK import *
+
 def network_trajectory(start_pos, start_vel,t):
-    PATH = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/autoencoder_velocities_works?/checkpoint_29.ckpt'
-    SCALER_CKPT = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/autoencoder_velocities_works?/scaler_29.npz'
+    PATH = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/ENTIRE_NETWORK_emb+cord/checkpoint_100.ckpt'
+    SCALER_CKPT = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/ENTIRE_NETWORK_emb+cord/scaler_100.npz'
     args = SimpleNamespace(use_layer_norm=False,
                         encoding_size=32,
                         hidden_dim=128,
@@ -50,55 +50,12 @@ def network_trajectory(start_pos, start_vel,t):
     model.cuda()
     model.eval()
 
-    PATH2 = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/sequential_network_wellsee/checkpoint_39.ckpt'
-    SCALER_CKPT2 = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/sequential_network_wellsee/scaler_39.npz'
-    args2 = SimpleNamespace(encoding_size=32)
-    model2 = Learner(args2).load_from_checkpoint(PATH2, args=args2)
-    #model2.load_training_stats(SCALER_CKPT2)
-    model2.cuda()
-    model2.eval()
-
 
     ## which one to start with
 
     with torch.no_grad():
 
-        pos_hopefully_same, embed, vel = model.embed_pos(start_pos, start_vel)
-
-        # graph = model.make_a_graph(start_pos)
-            
-        next_embeddings = model2.ode_embed_func(embed,t-1)
-
-        # see how well it preformes (test)
-
-        trajectory = model.decode_the_sequence(next_embeddings, t-1)
-
-        trajectory = [start_pos] + trajectory
-
-        embeddings_real = []
-
-        for i in range(0,4):
-
-            data = np.load(f'md_dataset/lj_data/data_7_{i+500}.npz')
-            pos_data = data['pos']
-            vel_data = data['vel']
-            #pos_hopefully_same, graph1, graph2, embed, force = model.predict_nextpos(pos_data)
-            pred, emb, vel = model.embed_pos(pos_data, vel_data)
-            embeddings_real.append(emb.detach().cpu().numpy())
-
-        embeddings_model_np= np.stack(next_embeddings.detach().cpu().numpy()[0:2], axis=0)
-        embeddings_real_np = np.stack(embeddings_real[0:2], axis=0)
-
-        #print("Test:")
-        #print(embeddings_model_np[33]-embeddings_real_np[33])
-
-        embeddings_real_tensor = torch.tensor(embeddings_real_np)
-        embeddings_model_tensor = torch.tensor(embeddings_model_np)
-
-        diff = nn.MSELoss()(embeddings_real_tensor,embeddings_model_tensor)
-
-        print("Diff in embeddings is:")
-        print(diff)
+        trajectory = model.run_the_network(start_pos, start_vel, t)
 
     return trajectory
 
@@ -140,10 +97,10 @@ num_particles = 258
 BOX_SIZE = 27.27
 box_size = np.array([BOX_SIZE, BOX_SIZE, BOX_SIZE])
 
-t_start = 500
-t = 3
+t_start = 400
+t = 99
 
-start_all = np.load(f'md_dataset/lj_data/data_7_{t_start}.npz')
+start_all = np.load(f'md_dataset/lj_data_to_test/data_0_{t_start}.npz')
 start_pos = start_all['pos']
 start_vel = start_all['vel']
 
@@ -151,19 +108,16 @@ trajectory_real = []
 trajectory_model = []
 
 for i in range(t_start,t+t_start):
-    everything = np.load(f'md_dataset/lj_data/data_7_{i}.npz')
+    everything = np.load(f'md_dataset/lj_data_to_test/data_0_{i}.npz')
     just_pos = everything['pos']
     trajectory_real.append(just_pos)
 
 trajectory_model = network_trajectory(start_pos, start_vel, t)
 
-print("omggg")
-
-
 #trajectory_model[1:] = [tensor.detach().cpu().numpy() for tensor in trajectory_model[1:]]
 
 trajectory_real_np= np.stack(trajectory_real, axis=0)
-trajectory_model_np = np.stack(trajectory_model, axis=0)
+trajectory_model_np = trajectory_model
 
 trajectory_model_np = np.mod(trajectory_model_np,BOX_SIZE)
 
@@ -178,14 +132,14 @@ print(loss)
 print("Difference is:")
 print(trajectory_model_np-trajectory_real_np)
 
-"""
-
-
-t_for_rdf = 200
+t_for_rdf = 50
 
 ## for one time snapshot
 
 if (t_for_rdf>t): print("Time for rdf has to be smaller than t")
+
+print("Size of trajectory real:")
+print(trajectory_real_np.shape[0])
 
 # Calculate RDF with periodic boundary conditions
 g_r_real, radii_real = rdf_func(trajectory_real_np[t_for_rdf], box_size, dr=0.1)
@@ -200,6 +154,9 @@ plt.legend()
 
 trajectory_model_np = np.mod(trajectory_model_np,BOX_SIZE)
 
+print("idk anymore")
+print(trajectory_real_np.shape)
+
 g_r_model, radii_model = rdf_func(trajectory_model_np[t_for_rdf], box_size, dr=0.1)
 
 # Plot RDF
@@ -207,7 +164,7 @@ plt.plot(radii_model, g_r_model)#, label='Model Data 1')
 plt.xlabel('Distance')
 plt.ylabel('Radial Distribution Function (RDF)')
 plt.legend()
-plt.savefig('results_rdfgraphs_velocity/rdf_graph_both_100_works?_test.png')
+plt.savefig('results_rdf_graphs_WHOLE_emb+cord/rdfgraph_emb_(t=50)_(epoch=100).png')
 
 print("Finished")
 
@@ -216,8 +173,8 @@ plt.close()
 
 ## an average of multiple snapshots
 
-t_for_rdf = 3
-t_for_rdf_end = 299
+t_for_rdf = 0
+t_for_rdf_end = 99
 
 g_r_real_all = []
 g_r_model_all = []
@@ -255,19 +212,22 @@ plt.plot(radii_model, g_r_model_average, label='Model Data')
 plt.xlabel('Distance')
 plt.ylabel('Average Radial Distribution Function (RDF)')
 plt.legend()
-plt.savefig('results_rdfgraphs_velocity/rdf_graph_average_3_222_works?_test.png')
+plt.savefig('results_rdf_graphs_WHOLE_emb+cord/rdfgraph_emb_(t=0-99)_(epoch=100).png')
+
+np.save('first_trajectory.npy', trajectory_model_np)
 
 print("Finished")
 
 ### visualize the trajectory of one particle
-"""
 
-particle_n = 33
+particle_n = 88
 
-trajectory_of1_real = trajectory_real_np[:,particle_n,:]
+time_final = 50
+
+trajectory_of1_real = trajectory_real_np[0:time_final,particle_n,:]
 print("Size of trjectory (should be len(t)*3)")
 print(trajectory_of1_real.size)
-trajectory_of1_model = trajectory_model_np[:,particle_n,:]
+trajectory_of1_model = trajectory_model_np[0:time_final:,particle_n,:]
 
 fig = plt.figure()
 ax = fig.add_subplot(111, projection='3d')
@@ -277,7 +237,7 @@ ax.set_ylabel('Y-axis')
 ax.set_zlabel('Z-axis')
 ax.set_title(f'Trajectory of Particle (one) {particle_n + 1} over Time + vel')
 ax.legend()
-fig.savefig("Trjectory of 1 (real)")
+fig.savefig(f"(new) Trjectory of {particle_n + 1} (real)")
 
 fig = plt.figure()
 ax = fig.add_subplot(111, projection='3d')
@@ -287,7 +247,101 @@ ax.set_ylabel('Y-axis')
 ax.set_zlabel('Z-axis')
 ax.set_title(f'Trajectory of Particle (one) {particle_n + 1} over Time + vel')
 ax.legend()
-fig.savefig("Trjectory of 1 (model)")
+fig.savefig(f"(new) Trjectory of {particle_n + 1} (model)")
+
+print(trajectory_of1_model)
+print(trajectory_of1_real)
+
+particle_n = 3
+
+time_final = 50
+
+trajectory_of1_real = trajectory_real_np[0:time_final,particle_n,:]
+trajectory_of1_model = trajectory_model_np[0:time_final:,particle_n,:]
+
+fig = plt.figure()
+ax = fig.add_subplot(111, projection='3d')
+ax.plot(trajectory_of1_real[:, 0], trajectory_of1_real[:, 1], trajectory_of1_real[:, 2], label=f'Particle {particle_n + 1}')
+ax.set_xlabel('X-axis')
+ax.set_ylabel('Y-axis')
+ax.set_zlabel('Z-axis')
+ax.set_title(f'Trajectory of Particle (one) {particle_n + 1} over Time + vel')
+ax.legend()
+fig.savefig(f"(new) Trjectory of {particle_n + 1} (real)")
+
+fig = plt.figure()
+ax = fig.add_subplot(111, projection='3d')
+ax.plot(trajectory_of1_model[:, 0], trajectory_of1_model[:, 1], trajectory_of1_model[:, 2], label=f'Particle {particle_n + 1}')
+ax.set_xlabel('X-axis')
+ax.set_ylabel('Y-axis')
+ax.set_zlabel('Z-axis')
+ax.set_title(f'Trajectory of Particle (one) {particle_n + 1} over Time + vel')
+ax.legend()
+fig.savefig(f"(new) Trjectory of {particle_n + 1} (model)")
+
+print(trajectory_of1_model)
+print(trajectory_of1_real)
+
+particle_n = 106
+
+time_final = 50
+
+trajectory_of1_real = trajectory_real_np[0:time_final,particle_n,:]
+print("Size of trjectory (should be len(t)*3)")
+print(trajectory_of1_real.size)
+trajectory_of1_model = trajectory_model_np[0:time_final:,particle_n,:]
+
+fig = plt.figure()
+ax = fig.add_subplot(111, projection='3d')
+ax.plot(trajectory_of1_real[:, 0], trajectory_of1_real[:, 1], trajectory_of1_real[:, 2], label=f'Particle {particle_n + 1}')
+ax.set_xlabel('X-axis')
+ax.set_ylabel('Y-axis')
+ax.set_zlabel('Z-axis')
+ax.set_title(f'Trajectory of Particle (one) {particle_n + 1} over Time + vel')
+ax.legend()
+fig.savefig(f"(new) Trjectory of {particle_n + 1} (real)")
+
+fig = plt.figure()
+ax = fig.add_subplot(111, projection='3d')
+ax.plot(trajectory_of1_model[:, 0], trajectory_of1_model[:, 1], trajectory_of1_model[:, 2], label=f'Particle {particle_n + 1}')
+ax.set_xlabel('X-axis')
+ax.set_ylabel('Y-axis')
+ax.set_zlabel('Z-axis')
+ax.set_title(f'Trajectory of Particle (one) {particle_n + 1} over Time + vel')
+ax.legend()
+fig.savefig(f"(new) Trjectory of {particle_n + 1} (model)")
+
+print(trajectory_of1_model)
+print(trajectory_of1_real)
+
+particle_n = 9
+
+time_final = 50
+
+trajectory_of1_real = trajectory_real_np[0:time_final,particle_n,:]
+print("Size of trjectory (should be len(t)*3)")
+print(trajectory_of1_real.size)
+trajectory_of1_model = trajectory_model_np[0:time_final:,particle_n,:]
+
+fig = plt.figure()
+ax = fig.add_subplot(111, projection='3d')
+ax.plot(trajectory_of1_real[:, 0], trajectory_of1_real[:, 1], trajectory_of1_real[:, 2], label=f'Particle {particle_n + 1}')
+ax.set_xlabel('X-axis')
+ax.set_ylabel('Y-axis')
+ax.set_zlabel('Z-axis')
+ax.set_title(f'Trajectory of Particle (one) {particle_n + 1} over Time + vel')
+ax.legend()
+fig.savefig(f"(new) Trjectory of {particle_n + 1} (real) (whole)")
+
+fig = plt.figure()
+ax = fig.add_subplot(111, projection='3d')
+ax.plot(trajectory_of1_model[:, 0], trajectory_of1_model[:, 1], trajectory_of1_model[:, 2], label=f'Particle {particle_n + 1}')
+ax.set_xlabel('X-axis')
+ax.set_ylabel('Y-axis')
+ax.set_zlabel('Z-axis')
+ax.set_title(f'Trajectory of Particle (one) {particle_n + 1} over Time + vel')
+ax.legend()
+fig.savefig(f"(new) Trjectory of {particle_n + 1} (model) (whole)")
 
 print(trajectory_of1_model)
 print(trajectory_of1_real)

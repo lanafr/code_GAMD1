@@ -25,6 +25,9 @@ from nn_module import SimpleMDNetNew
 from train_utils import LJDataNew
 from graph_utils import NeighborSearcher, graph_network_nbr_fn
 import time
+from NN_modules import *
+from train_utils_seq import *
+
 
 # os.environ["CUDA_VISIBLE_DEVICES"] = "" # just to test if it works w/o gpu
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
@@ -59,7 +62,7 @@ def build_model(args, ckpt=None):
 
     print("Using following set of hyper-parameters")
     print(param_dict)
-    model = SimpleMDNetNew(**param_dict)
+    model = EntireModel(**param_dict)
 
     if ckpt is not None:
         print('Loading model weights from: ', ckpt)
@@ -102,34 +105,38 @@ class ParticleNetLightning(pl.LightningModule):
             self.training_var = scaler_info['var']
 
     
-    def embed_pos(self, pos: np.ndarray, vel: np.ndarray, verbose=False):
-        nbr_start = time.time()
-        edge_idx_tsr = self.search_for_neighbor(pos,
+    def run_the_network(self, start_pos: np.ndarray, start_vel: np.ndarray, t, verbose=False):
+
+        edge_idx_lst = []
+
+        edge_idx_tsr = self.search_for_neighbor(start_pos,
                                                 self.nbr_searcher,
                                                 self.nbrlst_to_edge_mask,
                                                 'all')
-        nbr_end = time.time()
-        # enforce periodic boundary
-        pos = np.mod(pos, np.array(BOX_SIZE))
-        pos = torch.from_numpy(pos).float().cuda()
-        vel = torch.from_numpy(vel).float().cuda()
-        force_start = time.time()
-        #pred, emb, forces = self.pnet_model([pos],
-        pred, emb, vel = self.pnet_model([pos],
-                               [edge_idx_tsr],
-                               [vel]
-                               )
-        force_end = time.time()
-        if verbose:
-            print('=============================================')
-            print(f'Nbr search used time: {nbr_end - nbr_start}')
-            print(f'Next pos prediction used time: {force_end - force_start}')
+        edge_idx_lst += [edge_idx_tsr]
 
-        pred = pred.detach().cpu().numpy()
+        #gt_pos = torch.cat(pos_lst, dim=0)
+        #gt_vel = torch.cat(vel_lst, dim=0)
 
-        return pred, emb, vel
+        integration_time = torch.arange(t).to('cuda')
+        integration_time = integration_time.float()
 
-    def make_a_graph(self,pos):
+        start_pos = torch.from_numpy(start_pos).float().cuda()
+        start_vel = torch.from_numpy(start_vel).float().cuda()
+
+        pos_res, vel_res, emb_res = self.pnet_model([start_pos],
+                                   edge_idx_lst,
+                                   [start_vel],
+                                   integration_time,
+                                   )
+
+        print(pos_res.size())
+
+        pos_res = pos_res.detach().cpu().numpy()
+
+        return pos_res
+
+    def make_a_graph(self, pos):
         edge_idx_tsr = self.search_for_neighbor(pos,
                                                     self.nbr_searcher,
                                                     self.nbrlst_to_edge_mask,
@@ -148,7 +155,6 @@ class ParticleNetLightning(pl.LightningModule):
             #graph_emb, pos_next, forces = self.pnet_model.gdecoder_MLP(sequence_embeddings[i])
             graph_emb, pos_next, vel = self.pnet_model.gdecoder_MLP(sequence_embeddings[i])
             
-            print(pos_next.size())
             pos_next = pos_next.detach().cpu().numpy()
             trajectory.append(pos_next)
 
@@ -192,64 +198,81 @@ class ParticleNetLightning(pl.LightningModule):
         return edge_idx_tsr.long()
 
     def training_step(self, batch, batch_nb):
-        #gt_lst=batch['pos_next']
-        gt_lst = batch ['pos']
-        #forces_lst = batch ['forces']
-        edge_idx_lst = []
-        vel_lst = batch['vel']
+
+        pos_lst = torch.stack(batch[0]['pos']).to('cuda').squeeze(dim=1)
+
+        vel_lst = torch.stack(batch[0]['vel']).to('cuda').squeeze(dim=1)
+
+        start_pos = pos_lst[0]
+        start_vel = vel_lst[0]
         
-        for b in range(len(gt_lst)):
-            gt = gt_lst[b]
-            vel = vel_lst[b]
-            #forces_gt = forces_lst[b]
+        ### encode the first position
 
-            gt = np.mod(gt, BOX_SIZE) #this I added
+        BOX_SIZE = torch.tensor([27.27, 27.27, 27.27]).to('cuda')
 
-            gt_lst[b] = torch.from_numpy(gt).float().cuda() #this I added
-            vel_lst[b] = torch.from_numpy(vel).float().cuda() #this I added
-            #forces_lst[b] = torch.from_numpy(forces_gt).float().cuda() #this I added
+        start_pos = torch.fmod(start_pos, BOX_SIZE) #this I added
 
-            edge_idx_tsr = self.search_for_neighbor(gt,
+        start_pos_np = start_pos.detach().cpu().numpy()
+
+        edge_idx_lst = []
+
+        edge_idx_tsr = self.search_for_neighbor(start_pos_np,
+                                                self.nbr_searcher,
+                                                self.nbrlst_to_edge_mask,
+                                                'all')
+        edge_idx_lst += [edge_idx_tsr]
+
+        #gt_pos = torch.cat(pos_lst, dim=0)
+        #gt_vel = torch.cat(vel_lst, dim=0)
+
+        integration_time = torch.arange(pos_lst.size()[0]).to('cuda')
+        integration_time = integration_time.float()
+
+        ### calculate the "true" emebeddings
+        fluid_edge_lst = []
+        for i in range (len(pos_lst)):
+            pos_lst_np = pos_lst[i].detach().cpu().numpy()
+            fluid_edge_tsr = self.search_for_neighbor(pos_lst_np,
                                                     self.nbr_searcher,
                                                     self.nbrlst_to_edge_mask,
                                                     'all')
-            edge_idx_lst += [edge_idx_tsr]
-        gt = torch.cat(gt_lst, dim=0)
-        vel = torch.cat(vel_lst, dim=0)
-        #forces_gt = torch.cat(forces_lst, dim=0)
+            fluid_edge_lst += [fluid_edge_tsr]
 
-        #pos_lst = [pos + torch.randn_like(pos) * 0.005 for pos in pos_lst] #adds some noise?
-
-        #pred = self.pnet_model(pos_lst,
-        #                       edge_idx_lst,
-        #                       )
-        #pred, emb, pred_forces = self.pnet_model(gt_lst,
-        pred, emb, pred_vel = self.pnet_model(gt_lst,
+        pos_res, vel_res, emb_res = self.pnet_model([start_pos],
                                    edge_idx_lst,
-                                   vel_lst
+                                   [start_vel],
+                                   integration_time,
                                    )
 
+        with torch.no_grad():
+            emb_lst = self.pnet_model.encoder(pos_lst, fluid_edge_lst, vel_lst)#.view(100, 258)
+
+        emb_lst = emb_lst.view_as(emb_res)
 
         if self.loss_fn == 'mae':
-            cord_loss = nn.L1Loss()(pred, gt)
+            cord_loss = nn.L1Loss()(pos_lst, pos_res)
             #rec_loss = nn.L1Loss()(graphem1, graphem2)
             #force_loss = nn.L1Loss()(pred_forces, forces_gt)
-            vel_loss = nn.L1Loss()(pred_vel, vel)
+            vel_loss = nn.L1Loss()(vel_lst, vel_res)
+            emb_loss = nn.L1Loss()(emb_lst, emb_res)
         else:
-            cord_loss = nn.MSELoss()(pred, gt)
+            cord_loss = nn.MSELoss()(pos_lst, pos_res)
             #rec_loss = nn.MSELoss()(graphem1, graphem2)
             #force_loss = nn.MSELoss()(pred_forces, forces_gt)
-            vel_loss = nn.MSELoss()(pred_vel, vel)
+            vel_loss = nn.MSELoss()(vel_lst, vel_res)
+            emb_loss = nn.L1Loss()(emb_lst, emb_res)
 
         #regularization_loss = (torch.mean(graphem1)).abs()
 
         #loss = cord_loss + rec_loss + 0.5/regularization_loss
 
-        conservative_loss = (torch.mean(pred)).abs() #conservative loss penalizes size of the predictions (remove it, leave it?)
-        loss = cord_loss + LAMBDA2 * conservative_loss + 0.1*vel_loss
+        #conservative_loss = (torch.mean(pred)).abs() #conservative loss penalizes size of the predictions (remove it, leave it?)
+        #loss = cord_loss #+ 0.1*vel_loss #+ LAMBDA2 * conservative_loss
+        loss = emb_loss + 0.01*cord_loss
 
         self.log('cord_loss', cord_loss, on_step=True, prog_bar=True, logger=True)
         self.log('vel_loss', vel_loss, on_step=True, prog_bar=True, logger=True)
+        self.log('emb_loss', emb_loss, on_step=True, prog_bar=True, logger=True)
         #self.log('force_loss', force_loss, on_step=True, prog_bar=True, logger=True)
         #self.log('graph rec loss', rec_loss, on_step=True, prog_bar=True, logger=True)
         self.log(f'actual loss:{self.loss_fn}', loss, on_step=True, prog_bar=True, logger=True)
@@ -259,88 +282,97 @@ class ParticleNetLightning(pl.LightningModule):
 
     def configure_optimizers(self):
         optim = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
-        sched = StepLR(optim, step_size=5, gamma=0.001**(5/self.epoch_num)) ## changed 5 to 2
+        sched = StepLR(optim, step_size=10, gamma=0.001**(10/self.epoch_num)) ## changed 5 to 2
         return [optim], [sched]
 
     def train_dataloader(self):
-        dataset = LJDataNew(dataset_path=os.path.join(self.data_dir, 'lj_data'),
+
+        dataset = sequence_of_pos(dataset_path=os.path.join(self.data_dir, 'lj_data'),
                                sample_num=999, #this I changed
-                               case_prefix='data_',
                                seed_num=10,
                                mode='train')
 
-        return DataLoader(dataset, num_workers=2, batch_size=self.batch_size, shuffle=True, # I changed shuffle from True to False to see how it effects the training and validation
-                          collate_fn=
-                          lambda batches: {
-                              'pos': [batch['pos'] for batch in batches],
-                              'forces': [batch['forces'] for batch in batches],
-                              'vel': [batch['vel'] for batch in batches],
-                              'pos_next': [batch['pos_next'] for batch in batches], #this I changed
-                              'forces_next': [batch['forces_next'] for batch in batches], #this I changed
-                          })
+        return DataLoader(dataset, batch_size=1, shuffle = True, pin_memory=False)
+        
 
     def val_dataloader(self):
-        dataset = LJDataNew(dataset_path=os.path.join(self.data_dir, 'lj_data'),
+
+        dataset = sequence_of_pos(dataset_path=os.path.join(self.data_dir, 'lj_data'),
                                sample_num=999, #this I changed
-                               case_prefix='data_',
                                seed_num=10,
                                mode='test')
 
-        return DataLoader(dataset, num_workers=2, batch_size=16, shuffle=False,
-                          collate_fn=
-                          lambda batches: {
-                              'pos': [batch['pos'] for batch in batches],
-                              'forces': [batch['forces'] for batch in batches],
-                              'vel': [batch['vel'] for batch in batches],
-                              'pos_next': [batch['pos_next'] for batch in batches],
-                              'forces_next': [batch['forces_next'] for batch in batches],
-                          })
+        return DataLoader(dataset, batch_size=1, shuffle = True, pin_memory=False)
 
 
     def validation_step(self, batch, batch_nb):
         with torch.no_grad():
-            #gt_lst = batch['pos_next']
-            gt_lst = batch['pos']
-            vel_lst = batch['vel']
+
+
+            pos_lst = torch.stack(batch[0]['pos']).to('cuda').squeeze(dim=1)
+
+            vel_lst = torch.stack(batch[0]['vel']).to('cuda').squeeze(dim=1)
+
+
+            start_pos = pos_lst[0]
+
+            start_vel = vel_lst[0]
+            
+            ### encode the first position
+
+            BOX_SIZE = torch.tensor([27.27, 27.27, 27.27]).to('cuda')
+
+            start_pos = torch.fmod(start_pos, BOX_SIZE) #this I added
+
+            start_pos_np = start_pos.detach().cpu().numpy()
 
             edge_idx_lst = []
-            for b in range(len(gt_lst)):
-                gt = gt_lst[b]
-                vel = vel_lst[b]
 
-                gt = np.mod(gt, BOX_SIZE) #this I added
+            edge_idx_tsr = self.search_for_neighbor(start_pos_np,
+                                                    self.nbr_searcher,
+                                                    self.nbrlst_to_edge_mask,
+                                                    'all')
+            edge_idx_lst += [edge_idx_tsr]
 
-                #gt = self.scale_force(gt, self.train_data_scaler).cuda()
-                gt_lst[b] = torch.from_numpy(gt).float().cuda() #this I added
-                vel_lst[b] = torch.from_numpy(vel).float().cuda() #this I added
+            print("ooo")
+            print(len(edge_idx_lst))
 
-                #gt_lst[b] = gt
+            #gt_pos = torch.cat(pos_lst, dim=0)
+            #gt_vel = torch.cat(vel_lst, dim=0)
 
-                edge_idx_tsr = self.search_for_neighbor(gt,
-                                                        self.nbr_searcher,
-                                                        self.nbrlst_to_edge_mask,
-                                                        'all')
-                edge_idx_lst += [edge_idx_tsr]
-            gt = torch.cat(gt_lst, dim=0)
-            vel = torch.cat(vel_lst, dim=0)
+            integration_time = torch.arange(pos_lst.size()[0]).to('cuda')
+            integration_time = integration_time.float()
 
-            #pred, emb, forces = self.pnet_model(gt_lst, edge_idx_lst)
-            pred, emb, pred_vel = self.pnet_model(gt_lst, edge_idx_lst, vel_lst)
+            pos_res, vel_res, emb_res = self.pnet_model([start_pos],
+                                    edge_idx_lst,
+                                    [start_vel],
+                                    integration_time,
+                                    )
+            
 
-            mse = nn.MSELoss()(pred, gt)
-            mse_vel = nn.MSELoss()(pred_vel, vel)
-            #mse_for_graphs = nn.MSELoss()(graphem1, graphem2)
-            mae = nn.L1Loss()(pred, gt)
-            mae_vel = nn.L1Loss()(pred_vel, vel)
-            #mae_for_graphs = nn.L1Loss()(graphem1, graphem2)
+            if self.loss_fn == 'mae':
+                cord_loss = nn.L1Loss()(pos_lst, pos_res)
+                #rec_loss = nn.L1Loss()(graphem1, graphem2)
+                #force_loss = nn.L1Loss()(pred_forces, forces_gt)
+                vel_loss = nn.L1Loss()(vel_lst, vel_res)
+            else:
+                cord_loss = nn.MSELoss()(pos_lst, pos_res)
+                #rec_loss = nn.MSELoss()(graphem1, graphem2)
+                #force_loss = nn.MSELoss()(pred_forces, forces_gt)
+                vel_loss = nn.MSELoss()(vel_lst, vel_res)
 
+            #regularization_loss = (torch.mean(graphem1)).abs()
 
-            self.log('val coordinates (mse)', mse, prog_bar=True, logger=True)
-            self.log('val coordinates (mse)', mse, prog_bar=True, logger=True)
-            self.log('val velocity (mae)', mae_vel, prog_bar=True, logger=True)
-            self.log('val velocity (mse)', mse_vel, prog_bar=True, logger=True)
-            #self.log('val graphs (mae)', mae_for_graphs, prog_bar=True, logger=True)
-            #self.log('val graphs (mse)', mse_for_graphs, prog_bar=True, logger=True)
+            #loss = cord_loss + rec_loss + 0.5/regularization_loss
+
+            #conservative_loss = (torch.mean(pred)).abs() #conservative loss penalizes size of the predictions (remove it, leave it?)
+            loss = cord_loss# + 0.1*vel_loss
+
+            self.log('val_cord_loss', cord_loss, on_step=True, prog_bar=True, logger=True)
+            self.log('val_vel_loss', vel_loss, on_step=True, prog_bar=True, logger=True)
+            #self.log('force_loss', force_loss, on_step=True, prog_bar=True, logger=True)
+            #self.log('graph rec loss', rec_loss, on_step=True, prog_bar=True, logger=True)
+            self.log(f'val loss:{self.loss_fn}', loss, on_step=True, prog_bar=True, logger=True)
 
 
 class ModelCheckpointAtEpochEnd(pl.Callback):
@@ -352,6 +384,8 @@ class ModelCheckpointAtEpochEnd(pl.Callback):
             filepath,
             save_step_frequency,
             prefix="checkpoint",
+            prefix1="encoder_checkpoint",
+            prefix2="decoder_checkpoint",
     ):
         """
         Args:
@@ -410,18 +444,19 @@ def train_model(args):
                       benchmark=True,
                       distributed_backend='ddp',
                       logger=wandb_logger,
+                      #resume_from_checkpoint='/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/ENTIRE_NETWORK/checkpoint_4640.ckpt',
                       )
     trainer.fit(model)
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--min_epoch', default=25, type=int)
-    parser.add_argument('--max_epoch', default=30, type=int)
-    parser.add_argument('--lr', default=1e-3, type=float)
-    parser.add_argument('--cp_dir', default='./model_ckpt/autoencoder_velocities_works?')
+    parser.add_argument('--min_epoch', default = 20000, type=int)
+    parser.add_argument('--max_epoch', default=20000, type=int)
+    parser.add_argument('--lr', default=1e-4, type=float)
+    parser.add_argument('--cp_dir', default='./model_ckpt/ENTIRE_NETWORK_emb+cord')
     parser.add_argument('--state_ckpt_dir', default=None, type=str)
-    parser.add_argument('--batch_size', default=16, type=int)
+    parser.add_argument('--batch_size', default=1, type=int)
     parser.add_argument('--encoding_size', default=32, type=int)
     parser.add_argument('--hidden_dim', default=128, type=int)
     parser.add_argument('--edge_embedding_dim', default=32, type=int)

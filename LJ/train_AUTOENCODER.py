@@ -25,6 +25,9 @@ from nn_module import SimpleMDNetNew
 from train_utils import LJDataNew
 from graph_utils import NeighborSearcher, graph_network_nbr_fn
 import time
+from NN_modules import *
+from train_utils_seq import *
+
 
 # os.environ["CUDA_VISIBLE_DEVICES"] = "" # just to test if it works w/o gpu
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
@@ -59,7 +62,7 @@ def build_model(args, ckpt=None):
 
     print("Using following set of hyper-parameters")
     print(param_dict)
-    model = SimpleMDNetNew(**param_dict)
+    model = Autoencoder(**param_dict)
 
     if ckpt is not None:
         print('Loading model weights from: ', ckpt)
@@ -148,7 +151,6 @@ class ParticleNetLightning(pl.LightningModule):
             #graph_emb, pos_next, forces = self.pnet_model.gdecoder_MLP(sequence_embeddings[i])
             graph_emb, pos_next, vel = self.pnet_model.gdecoder_MLP(sequence_embeddings[i])
             
-            print(pos_next.size())
             pos_next = pos_next.detach().cpu().numpy()
             trajectory.append(pos_next)
 
@@ -191,23 +193,20 @@ class ParticleNetLightning(pl.LightningModule):
         edge_idx_tsr = self.get_edge_idx(nbrs, pos_jax, edge_mask_all)
         return edge_idx_tsr.long()
 
+
     def training_step(self, batch, batch_nb):
-        #gt_lst=batch['pos_next']
         gt_lst = batch ['pos']
-        #forces_lst = batch ['forces']
         edge_idx_lst = []
         vel_lst = batch['vel']
         
         for b in range(len(gt_lst)):
             gt = gt_lst[b]
             vel = vel_lst[b]
-            #forces_gt = forces_lst[b]
 
             gt = np.mod(gt, BOX_SIZE) #this I added
 
             gt_lst[b] = torch.from_numpy(gt).float().cuda() #this I added
             vel_lst[b] = torch.from_numpy(vel).float().cuda() #this I added
-            #forces_lst[b] = torch.from_numpy(forces_gt).float().cuda() #this I added
 
             edge_idx_tsr = self.search_for_neighbor(gt,
                                                     self.nbr_searcher,
@@ -216,37 +215,32 @@ class ParticleNetLightning(pl.LightningModule):
             edge_idx_lst += [edge_idx_tsr]
         gt = torch.cat(gt_lst, dim=0)
         vel = torch.cat(vel_lst, dim=0)
-        #forces_gt = torch.cat(forces_lst, dim=0)
 
-        #pos_lst = [pos + torch.randn_like(pos) * 0.005 for pos in pos_lst] #adds some noise?
-
-        #pred = self.pnet_model(pos_lst,
-        #                       edge_idx_lst,
-        #                       )
-        #pred, emb, pred_forces = self.pnet_model(gt_lst,
-        pred, emb, pred_vel = self.pnet_model(gt_lst,
+        res_pos, res_vel = self.pnet_model(gt_lst,
                                    edge_idx_lst,
                                    vel_lst
                                    )
 
 
         if self.loss_fn == 'mae':
-            cord_loss = nn.L1Loss()(pred, gt)
+            cord_loss = nn.L1Loss()(res_pos, gt)
             #rec_loss = nn.L1Loss()(graphem1, graphem2)
             #force_loss = nn.L1Loss()(pred_forces, forces_gt)
-            vel_loss = nn.L1Loss()(pred_vel, vel)
+            vel_loss = nn.L1Loss()(res_vel, vel)
         else:
-            cord_loss = nn.MSELoss()(pred, gt)
+            cord_loss = nn.MSELoss()(res_pos, gt)
             #rec_loss = nn.MSELoss()(graphem1, graphem2)
             #force_loss = nn.MSELoss()(pred_forces, forces_gt)
-            vel_loss = nn.MSELoss()(pred_vel, vel)
+            vel_loss = nn.MSELoss()(res_vel, vel)
+
+        print(res_pos.size())
 
         #regularization_loss = (torch.mean(graphem1)).abs()
 
         #loss = cord_loss + rec_loss + 0.5/regularization_loss
 
-        conservative_loss = (torch.mean(pred)).abs() #conservative loss penalizes size of the predictions (remove it, leave it?)
-        loss = cord_loss + LAMBDA2 * conservative_loss + 0.1*vel_loss
+        conservative_loss = (torch.mean(res_vel)).abs() #conservative loss penalizes size of the predictions (remove it, leave it?)
+        loss = cord_loss #+ 0.1*vel_loss #+ LAMBDA2 * 100 * conservative_loss
 
         self.log('cord_loss', cord_loss, on_step=True, prog_bar=True, logger=True)
         self.log('vel_loss', vel_loss, on_step=True, prog_bar=True, logger=True)
@@ -259,7 +253,7 @@ class ParticleNetLightning(pl.LightningModule):
 
     def configure_optimizers(self):
         optim = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
-        sched = StepLR(optim, step_size=5, gamma=0.001**(5/self.epoch_num)) ## changed 5 to 2
+        sched = StepLR(optim, step_size=30, gamma=0.001**(10/self.epoch_num)) ## changed 5 to 2
         return [optim], [sched]
 
     def train_dataloader(self):
@@ -274,11 +268,9 @@ class ParticleNetLightning(pl.LightningModule):
                           lambda batches: {
                               'pos': [batch['pos'] for batch in batches],
                               'forces': [batch['forces'] for batch in batches],
-                              'vel': [batch['vel'] for batch in batches],
-                              'pos_next': [batch['pos_next'] for batch in batches], #this I changed
-                              'forces_next': [batch['forces_next'] for batch in batches], #this I changed
+                              'vel': [batch['vel'] for batch in batches]
                           })
-
+        
     def val_dataloader(self):
         dataset = LJDataNew(dataset_path=os.path.join(self.data_dir, 'lj_data'),
                                sample_num=999, #this I changed
@@ -286,20 +278,17 @@ class ParticleNetLightning(pl.LightningModule):
                                seed_num=10,
                                mode='test')
 
-        return DataLoader(dataset, num_workers=2, batch_size=16, shuffle=False,
+        return DataLoader(dataset, num_workers=2, batch_size=16, shuffle=True,
                           collate_fn=
                           lambda batches: {
                               'pos': [batch['pos'] for batch in batches],
                               'forces': [batch['forces'] for batch in batches],
                               'vel': [batch['vel'] for batch in batches],
-                              'pos_next': [batch['pos_next'] for batch in batches],
-                              'forces_next': [batch['forces_next'] for batch in batches],
                           })
 
 
     def validation_step(self, batch, batch_nb):
         with torch.no_grad():
-            #gt_lst = batch['pos_next']
             gt_lst = batch['pos']
             vel_lst = batch['vel']
 
@@ -310,11 +299,8 @@ class ParticleNetLightning(pl.LightningModule):
 
                 gt = np.mod(gt, BOX_SIZE) #this I added
 
-                #gt = self.scale_force(gt, self.train_data_scaler).cuda()
                 gt_lst[b] = torch.from_numpy(gt).float().cuda() #this I added
                 vel_lst[b] = torch.from_numpy(vel).float().cuda() #this I added
-
-                #gt_lst[b] = gt
 
                 edge_idx_tsr = self.search_for_neighbor(gt,
                                                         self.nbr_searcher,
@@ -324,15 +310,12 @@ class ParticleNetLightning(pl.LightningModule):
             gt = torch.cat(gt_lst, dim=0)
             vel = torch.cat(vel_lst, dim=0)
 
-            #pred, emb, forces = self.pnet_model(gt_lst, edge_idx_lst)
-            pred, emb, pred_vel = self.pnet_model(gt_lst, edge_idx_lst, vel_lst)
+            res_pos, res_vel = self.pnet_model(gt_lst, edge_idx_lst, vel_lst)
 
-            mse = nn.MSELoss()(pred, gt)
-            mse_vel = nn.MSELoss()(pred_vel, vel)
-            #mse_for_graphs = nn.MSELoss()(graphem1, graphem2)
-            mae = nn.L1Loss()(pred, gt)
-            mae_vel = nn.L1Loss()(pred_vel, vel)
-            #mae_for_graphs = nn.L1Loss()(graphem1, graphem2)
+            mse = nn.MSELoss()(res_pos, gt)
+            mse_vel = nn.MSELoss()(res_vel, vel)
+            mae = nn.L1Loss()(res_pos, gt)
+            mae_vel = nn.L1Loss()(res_vel, vel)
 
 
             self.log('val coordinates (mse)', mse, prog_bar=True, logger=True)
@@ -352,6 +335,8 @@ class ModelCheckpointAtEpochEnd(pl.Callback):
             filepath,
             save_step_frequency,
             prefix="checkpoint",
+            prefix1="encoder_checkpoint",
+            prefix2="decoder_checkpoint",
     ):
         """
         Args:
@@ -361,6 +346,8 @@ class ModelCheckpointAtEpochEnd(pl.Callback):
         self.filepath = filepath
         self.save_step_frequency = save_step_frequency
         self.prefix = prefix
+        self.prefix1 = prefix1
+        self.prefix2 = prefix2
 
     def on_epoch_end(self, trainer: pl.Trainer, pl_module: ParticleNetLightning):
         """ Check if we should save a checkpoint after every train batch """
@@ -376,6 +363,15 @@ class ModelCheckpointAtEpochEnd(pl.Callback):
                      var=pl_module.training_var,
                      )
             # joblib.dump(pl_module.train_data_scaler, scaler_filename)
+
+            ### different checkpoints saved for Encoder and Decoder
+            filename1 = os.path.join(self.filepath, f"{self.prefix1}_{epoch}.ckpt")
+            ckpt_path1 = os.path.join(trainer.checkpoint_callback.dirpath, filename1)
+            torch.save(pl_module.pnet_model.encoder.state_dict(), ckpt_path1)
+
+            filename2 = os.path.join(self.filepath, f"{self.prefix2}_{epoch}.ckpt")
+            ckpt_path2 = os.path.join(trainer.checkpoint_callback.dirpath, filename2)
+            torch.save(pl_module.pnet_model.decoder.state_dict(), ckpt_path2)
 
 
 def train_model(args):
@@ -416,10 +412,10 @@ def train_model(args):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--min_epoch', default=25, type=int)
-    parser.add_argument('--max_epoch', default=30, type=int)
-    parser.add_argument('--lr', default=1e-3, type=float)
-    parser.add_argument('--cp_dir', default='./model_ckpt/autoencoder_velocities_works?')
+    parser.add_argument('--min_epoch', default=40, type=int)
+    parser.add_argument('--max_epoch', default=40, type=int)
+    parser.add_argument('--lr', default=1e-4, type=float)
+    parser.add_argument('--cp_dir', default='./model_ckpt/AUTOENCODER')
     parser.add_argument('--state_ckpt_dir', default=None, type=str)
     parser.add_argument('--batch_size', default=16, type=int)
     parser.add_argument('--encoding_size', default=32, type=int)

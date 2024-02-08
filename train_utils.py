@@ -33,7 +33,6 @@ class LJDataNew(Dataset):
     def __len__(self):
         return len(self.idx)
 
-    """
 
     def __getitem__(self, idx, get_path_name=False):
         idx = self.idx[idx]
@@ -48,6 +47,8 @@ class LJDataNew(Dataset):
             data['pos'] = pos
             forces = raw_data['forces'].astype(np.float32)
             data['forces'] = forces
+            vel = raw_data['vel'].astype(np.float32)
+            data['vel'] = vel
         if get_path_name:
             return data, data_path
         return data
@@ -76,6 +77,8 @@ class LJDataNew(Dataset):
             data['pos'] = pos
             forces = raw_data['forces'].astype(np.float32)
             data['forces'] = forces
+            vel = raw_data['vel'].astype(np.float32)
+            data['vel'] = vel
         with np.load(data_path_next + '.npz', 'rb') as raw_data_next:
             pos_next = raw_data_next['pos'].astype(np.float32)
             data['pos_next'] = pos_next
@@ -115,3 +118,5 @@ class Graphs_data(Dataset):
         graph = dgl.load_graphs(data_path)
 
         return graph
+
+        """

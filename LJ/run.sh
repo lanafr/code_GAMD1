@@ -6,7 +6,7 @@
 #SBATCH --time=0-24:00:00  # Limit on the total run time (format: days-hours:minutes:seconds)
 #SBATCH --gres=gpu:1  # Number of GPUs if needed
 #SBATCH --cpus-per-task=8  # Number of CPUs (Don't use more than 24 per GPU)
-#SBATCH --mem=25G  # Memory in GB (Don't use more than 126G per GPU)
+#SBATCH --mem=50G  # Memory in GB (Don't use more than 126G per GPU)
 
 # load python module
 
@@ -56,6 +56,13 @@ export PATH="/home/guests/lana_frkin/.local/bin:$PATH"
 #python generate_graphs.py
 #python test_script/visualize_graph.py
 #python generate_lj_data.py
-#python the_sequential_network.py
-python entire_network_test.py
+#python the_sequential_network1.py
+#python seqn_just1particle.py
+#python seqn_2_decoderincluded.py
+#python entire_network_test.py
 #python entire_network.py
+#python train_AUTOENCODER.py
+python train_ENTIRE_NETWORK.py
+#python RNN_sequential_network.py
+#python entire_network_RNN.py
+#python TEST_entire_network.py
