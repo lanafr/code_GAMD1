@@ -62,7 +62,7 @@ export PATH="/home/guests/lana_frkin/.local/bin:$PATH"
 #python entire_network_test.py
 #python entire_network.py
 #python train_AUTOENCODER.py
-python train_ENTIRE_NETWORK.py
+python train_ENTIRE_NETWORK.py --mode train --architecture latentode
 #python RNN_sequential_network.py
 #python entire_network_RNN.py
 #python TEST_entire_network.py

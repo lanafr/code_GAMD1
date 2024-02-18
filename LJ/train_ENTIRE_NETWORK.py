@@ -58,6 +58,8 @@ def build_model(args, ckpt=None):
                   'drop_edge': args.drop_edge,
                   'use_layer_norm': args.use_layer_norm,
                   'box_size': BOX_SIZE,
+                  'mode': args.mode,
+                  'architecture': args.architecture
                   }
 
     print("Using following set of hyper-parameters")
@@ -71,7 +73,7 @@ def build_model(args, ckpt=None):
 
 
 class ParticleNetLightning(pl.LightningModule):
-    def __init__(self, args, num_device=1, epoch_num=100, batch_size=1, learning_rate=3e-4, log_freq=1000,
+    def __init__(self, args, mode = 'train', architecture = 'latentode', num_device=1, epoch_num=100, batch_size=1, learning_rate=3e-4, log_freq=1000,
                  model_weights_ckpt=None, scaler_ckpt=None):
         super(ParticleNetLightning, self).__init__()
         self.pnet_model = build_model(args, model_weights_ckpt)
@@ -83,6 +85,8 @@ class ParticleNetLightning(pl.LightningModule):
         self.train_data_scaler = StandardScaler()
         self.training_mean = np.array([0.])
         self.training_var = np.array([1.])
+        self.mode = mode
+        self.architecture = architecture
 
         if scaler_ckpt is not None:
             self.load_training_stats(scaler_ckpt)
@@ -107,32 +111,72 @@ class ParticleNetLightning(pl.LightningModule):
     
     def run_the_network(self, start_pos: np.ndarray, start_vel: np.ndarray, t, verbose=False):
 
-        edge_idx_lst = []
+        print("Modeeeeeeeeee is:")
+        print(self.architecture)
+        
+        if self.architecture == 'node' or self.architecture == 'recurrent':
+            edge_idx_lst = []
 
-        edge_idx_tsr = self.search_for_neighbor(start_pos,
-                                                self.nbr_searcher,
-                                                self.nbrlst_to_edge_mask,
-                                                'all')
-        edge_idx_lst += [edge_idx_tsr]
+            edge_idx_tsr = self.search_for_neighbor(start_pos,
+                                                    self.nbr_searcher,
+                                                    self.nbrlst_to_edge_mask,
+                                                    'all')
+            edge_idx_lst += [edge_idx_tsr]
 
-        #gt_pos = torch.cat(pos_lst, dim=0)
-        #gt_vel = torch.cat(vel_lst, dim=0)
+            integration_time = torch.arange(t).to('cuda')
+            integration_time = integration_time.float()
 
-        integration_time = torch.arange(t).to('cuda')
-        integration_time = integration_time.float()
+            start_vel = torch.from_numpy(start_vel).float().cuda()            
+            start_pos = torch.from_numpy(start_pos).float().cuda()
 
-        start_pos = torch.from_numpy(start_pos).float().cuda()
-        start_vel = torch.from_numpy(start_vel).float().cuda()
+        with torch.no_grad():
+            if self.architecture == 'node':
+                pos_res, vel_res, emb_res = self.pnet_model([start_pos],
+                                        edge_idx_lst,
+                                        [start_vel],
+                                        integration_time,
+                                        )
 
-        pos_res, vel_res, emb_res = self.pnet_model([start_pos],
-                                   edge_idx_lst,
-                                   [start_vel],
-                                   integration_time,
-                                   )
+                pos_res = pos_res.detach().cpu().numpy()
 
-        print(pos_res.size())
+            if self.architecture == 'recurrent':
+                pos_res = [start_pos.detach().cpu().numpy()]
+                next_pos, start_vel, emb = self.pnet_model([start_pos],
+                                        edge_idx_lst,
+                                        [start_vel],
+                                        integration_time,
+                                        )
+                for i in range (t-1):
+                    emb = self.pnet_model.recurrent(emb)
+                    emb_new, pos_new, vel_new = self.pnet_model.decoder(emb)
+                    pos_res.append(pos_new.squeeze(0).detach().cpu().numpy())
+                
+                pos_res = np.stack(pos_res)
+                print(pos_res.shape)
 
-        pos_res = pos_res.detach().cpu().numpy()
+            if self.architecture == 'latentode':
+
+                integration_time = torch.arange(int(t/2)).to('cuda')
+                integration_time = integration_time.float()
+
+                pos_lst = [torch.from_numpy(arr).to('cuda').to(torch.float32) for arr in start_pos]
+                vel_lst = [torch.from_numpy(arr).to('cuda').to(torch.float32) for arr in start_vel]
+
+                fluid_edge_lst = []
+                for i in range (len(pos_lst)):
+                    pos_lst_np = pos_lst[i].detach().cpu().numpy()
+                    fluid_edge_tsr = self.search_for_neighbor(pos_lst_np,
+                                                            self.nbr_searcher,
+                                                            self.nbrlst_to_edge_mask,
+                                                            'all')
+                    fluid_edge_lst += [fluid_edge_tsr]
+
+                pos_res, vel_res, emb_res = self.pnet_model(pos_lst,
+                                            fluid_edge_lst,
+                                            vel_lst,
+                                            integration_time,
+                                            )
+                pos_res = pos_res.detach().cpu().numpy()
 
         return pos_res
 
@@ -147,7 +191,7 @@ class ParticleNetLightning(pl.LightningModule):
         graph_now = dgl.graph((neigh_idx, center_idx))
 
         return graph_now
-
+    """
     def decode_the_sequence(self, sequence_embeddings: torch.Tensor, t):
         trajectory = []
         
@@ -159,7 +203,7 @@ class ParticleNetLightning(pl.LightningModule):
             trajectory.append(pos_next)
 
         return trajectory
-
+    """
 
     def get_edge_idx(self, nbrs, pos_jax, mask):
         dummy_center_idx = nbrs.idx.copy()
@@ -200,54 +244,53 @@ class ParticleNetLightning(pl.LightningModule):
     def training_step(self, batch, batch_nb):
 
         pos_lst = torch.stack(batch[0]['pos']).to('cuda').squeeze(dim=1)
-
         vel_lst = torch.stack(batch[0]['vel']).to('cuda').squeeze(dim=1)
-
-        start_pos = pos_lst[0]
-        start_vel = vel_lst[0]
-        
-        ### encode the first position
-
-        BOX_SIZE = torch.tensor([27.27, 27.27, 27.27]).to('cuda')
-
-        start_pos = torch.fmod(start_pos, BOX_SIZE) #this I added
-
-        start_pos_np = start_pos.detach().cpu().numpy()
-
-        edge_idx_lst = []
-
-        edge_idx_tsr = self.search_for_neighbor(start_pos_np,
-                                                self.nbr_searcher,
-                                                self.nbrlst_to_edge_mask,
-                                                'all')
-        edge_idx_lst += [edge_idx_tsr]
-
-        #gt_pos = torch.cat(pos_lst, dim=0)
-        #gt_vel = torch.cat(vel_lst, dim=0)
 
         integration_time = torch.arange(pos_lst.size()[0]).to('cuda')
         integration_time = integration_time.float()
 
-        ### calculate the "true" emebeddings
-        fluid_edge_lst = []
-        for i in range (len(pos_lst)):
-            pos_lst_np = pos_lst[i].detach().cpu().numpy()
-            fluid_edge_tsr = self.search_for_neighbor(pos_lst_np,
+        if self.architecture == 'node':
+            start_pos = pos_lst[0]
+            start_vel = vel_lst[0]
+            
+            ### encode the first position
+            BOX_SIZE = torch.tensor([27.27, 27.27, 27.27]).to('cuda')
+            start_pos = torch.fmod(start_pos, BOX_SIZE) #this I added
+            start_pos_np = start_pos.detach().cpu().numpy()
+
+            edge_idx_lst = []
+            edge_idx_tsr = self.search_for_neighbor(start_pos_np,
                                                     self.nbr_searcher,
                                                     self.nbrlst_to_edge_mask,
                                                     'all')
-            fluid_edge_lst += [fluid_edge_tsr]
+            edge_idx_lst += [edge_idx_tsr]
 
-        pos_res, vel_res, emb_res = self.pnet_model([start_pos],
-                                   edge_idx_lst,
-                                   [start_vel],
-                                   integration_time,
-                                   )
+            pos_res, vel_res, emb_res = self.pnet_model([start_pos],
+                                    edge_idx_lst,
+                                    [start_vel],
+                                    integration_time,
+                                    )
+
+        if self.architecture == 'recurrent' or self.architecture == 'latentode':
+
+            ### calculate the "true" emebeddings
+            fluid_edge_lst = []
+            for i in range (len(pos_lst)):
+                pos_lst_np = pos_lst[i].detach().cpu().numpy()
+                fluid_edge_tsr = self.search_for_neighbor(pos_lst_np,
+                                                        self.nbr_searcher,
+                                                        self.nbrlst_to_edge_mask,
+                                                        'all')
+                fluid_edge_lst += [fluid_edge_tsr]
+
+            pos_res, vel_res, emb_res = self.pnet_model(pos_lst,
+                                    fluid_edge_lst,
+                                    vel_lst,
+                                    integration_time,
+                                    )
 
         with torch.no_grad():
-            emb_lst = self.pnet_model.encoder(pos_lst, fluid_edge_lst, vel_lst)#.view(100, 258)
-
-        emb_lst = emb_lst.view_as(emb_res)
+            emb_lst = self.pnet_model.encoder(pos_lst, fluid_edge_lst, vel_lst).view_as(emb_res)
 
         if self.loss_fn == 'mae':
             cord_loss = nn.L1Loss()(pos_lst, pos_res)
@@ -306,36 +349,11 @@ class ParticleNetLightning(pl.LightningModule):
 
 
     def validation_step(self, batch, batch_nb):
+
         with torch.no_grad():
 
-
             pos_lst = torch.stack(batch[0]['pos']).to('cuda').squeeze(dim=1)
-
             vel_lst = torch.stack(batch[0]['vel']).to('cuda').squeeze(dim=1)
-
-
-            start_pos = pos_lst[0]
-
-            start_vel = vel_lst[0]
-            
-            ### encode the first position
-
-            BOX_SIZE = torch.tensor([27.27, 27.27, 27.27]).to('cuda')
-
-            start_pos = torch.fmod(start_pos, BOX_SIZE) #this I added
-
-            start_pos_np = start_pos.detach().cpu().numpy()
-
-            edge_idx_lst = []
-
-            edge_idx_tsr = self.search_for_neighbor(start_pos_np,
-                                                    self.nbr_searcher,
-                                                    self.nbrlst_to_edge_mask,
-                                                    'all')
-            edge_idx_lst += [edge_idx_tsr]
-
-            print("ooo")
-            print(len(edge_idx_lst))
 
             #gt_pos = torch.cat(pos_lst, dim=0)
             #gt_vel = torch.cat(vel_lst, dim=0)
@@ -343,12 +361,47 @@ class ParticleNetLightning(pl.LightningModule):
             integration_time = torch.arange(pos_lst.size()[0]).to('cuda')
             integration_time = integration_time.float()
 
-            pos_res, vel_res, emb_res = self.pnet_model([start_pos],
-                                    edge_idx_lst,
-                                    [start_vel],
-                                    integration_time,
-                                    )
+            if self.architecture == 'node':
+
+                start_pos = pos_lst[0]
+                start_vel = vel_lst[0]
+                
+                ### encode the first position
+                BOX_SIZE = torch.tensor([27.27, 27.27, 27.27]).to('cuda')
+                start_pos = torch.fmod(start_pos, BOX_SIZE) #this I added
+                start_pos_np = start_pos.detach().cpu().numpy()
+
+                edge_idx_lst = []
+                edge_idx_tsr = self.search_for_neighbor(start_pos_np,
+                                                        self.nbr_searcher,
+                                                        self.nbrlst_to_edge_mask,
+                                                        'all')
+                edge_idx_lst += [edge_idx_tsr]
+
+                pos_res, vel_res, emb_res = self.pnet_model([start_pos],
+                                        edge_idx_lst,
+                                        [start_vel],
+                                        integration_time,
+                                        )
             
+            if self.architecture == 'recurrent' or self.architecture == 'latentode':
+                
+                ### calculate the "true" emebeddings
+                fluid_edge_lst = []
+                for i in range (len(pos_lst)):
+                    pos_lst_np = pos_lst[i].detach().cpu().numpy()
+                    fluid_edge_tsr = self.search_for_neighbor(pos_lst_np,
+                                                            self.nbr_searcher,
+                                                            self.nbrlst_to_edge_mask,
+                                                            'all')
+                    fluid_edge_lst += [fluid_edge_tsr]
+
+                pos_res, vel_res, emb_res = self.pnet_model(pos_lst,
+                                        fluid_edge_lst,
+                                        vel_lst,
+                                        integration_time,
+                                        )
+
 
             if self.loss_fn == 'mae':
                 cord_loss = nn.L1Loss()(pos_lst, pos_res)
@@ -420,6 +473,8 @@ def train_model(args):
     max_epoch = args.max_epoch
     weight_ckpt = args.state_ckpt_dir
     batch_size = args.batch_size
+    mode = args.mode
+    architecture = args.architecture
     wandb_logger = WandbLogger()
 
     model = ParticleNetLightning(epoch_num=max_epoch,
@@ -427,6 +482,8 @@ def train_model(args):
                                  learning_rate=lr,
                                  model_weights_ckpt=weight_ckpt,
                                  batch_size=batch_size,
+                                 mode=mode,
+                                 architecture=architecture,
                                  args=args)
     cwd = os.getcwd()
     model_check_point_dir = os.path.join(cwd, check_point_dir)
@@ -451,10 +508,10 @@ def train_model(args):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--min_epoch', default = 20000, type=int)
-    parser.add_argument('--max_epoch', default=20000, type=int)
+    parser.add_argument('--min_epoch', default = 5000, type=int)
+    parser.add_argument('--max_epoch', default = 5000, type=int)
     parser.add_argument('--lr', default=1e-4, type=float)
-    parser.add_argument('--cp_dir', default='./model_ckpt/ENTIRE_NETWORK_emb+cord')
+    parser.add_argument('--cp_dir', default='./model_ckpt/ENTIRE_NETWORK_latentODE_interp')
     parser.add_argument('--state_ckpt_dir', default=None, type=str)
     parser.add_argument('--batch_size', default=1, type=int)
     parser.add_argument('--encoding_size', default=32, type=int)
@@ -466,6 +523,8 @@ def main():
     parser.add_argument('--data_dir', default='./md_dataset')
     parser.add_argument('--loss', default='mse')
     parser.add_argument('--num_gpu', default=-1, type=int)
+    parser.add_argument('--architecture', default='recurrent', type=str)
+    parser.add_argument('--mode', default='train', type=str)
     args = parser.parse_args()
     train_model(args)
 

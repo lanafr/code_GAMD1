@@ -297,7 +297,7 @@ class sequence_of_pos(Dataset):
     
 
     def get_sequence(self, index):
-        idxs = np.arange(0, 100)
+        idxs = np.arange(0, 200)
 
         pos_lst = []
         vel_lst = []
@@ -348,42 +348,85 @@ class sequence_of_pos(Dataset):
         return data
 
 
-    """
-    ## for the gamd-like autoencoder
-    def get_it(self, seed_num, idxs):
-        PATH = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/GAMD_like/checkpoint_29.ckpt'
-        SCALER_CKPT = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/GAMD_like/scaler_29.npz'
-        args = SimpleNamespace(use_layer_norm=False,
-                            encoding_size=128,
-                            hidden_dim=128,
-                            edge_embedding_dim=256,
-                            drop_edge=False,
-                            conv_layer=4,
-                            rotate_aug=False,
-                            update_edge=False,
-                            use_part=False,
-                            data_dir='',
-                            loss='mse')
-        model = ParticleNetLightning_GAMD(args).load_from_checkpoint(PATH, args=args)
-        model.load_training_stats(SCALER_CKPT)
-        model.cuda()
-        model.eval()
+class shorter_sequences_of_pos(Dataset):
+    def __init__(self,
+            dataset_path,
+            sample_num,   # per seed
+            device='cuda',
+            split=(0.9, 0.1),
+            seed_num=10,
+            mode='train',
+            sequence_lenght = 8,
+            use_all = True,):
 
-        embed_lst = [0]*len(idxs)
+        self.device = device
+        self.seed_num = seed_num
+        self.dataset_path = dataset_path
+        self.sample_num = int(sample_num/2)
+        self.case_prefix = 'data_'
+        self.seed_num = seed_num
+        self.sequence_lenght = sequence_lenght
+        self.use_all = use_all
 
-        j=0
+        self.mode = mode
+        assert mode in ['train', 'test']
+        #np.random.seed(0)   # fix same random seed: Setting a random seed ensures that the random shuffling of idxs will be the same every time you run your code, making your results reproducible.
+        seed_seq = [i for i in range(sample_num+1-sequence_lenght)]
+        ratio = split[0]
+        if mode == 'train':
+            self.index = seed_seq[:int(len(seed_seq)*ratio)]
+        else:
+            self.index = seed_seq[int(len(seed_seq)*ratio):]
+
+    def __getitem__(self, index):
+
+        data = []
+        idxs = self.index
 
         for i in idxs:
 
-            data = np.load(f'md_dataset/lj_data/data_{seed_num}_{i+500}.npz')
-            pos_data = data['pos']
-            #pos_hopefully_same, graph1, graph2, embed, force = model.predict_nextpos(pos_data)
-            forces, pos, emb = model.predict_forces(pos_data)
-            embed_lst[j] = emb
-            j=j+1
+            data.append(self.get_sequence(i,index))
 
-        #return brand_new_data
-        embed_numpy = [tensor.detach().cpu().numpy() for tensor in embed_lst]
+        return data
 
-        return embed_numpy
-        """
+    def __len__(self):
+        return len(self.index)
+    
+
+    def get_sequence(self, start, seed):
+        short_seq = [i for i in range(start, start+self.sequence_lenght)]
+
+        pos_lst = []
+        vel_lst = []
+
+        for i in short_seq:
+
+            current_pos = self.get_one(i, seed)['pos']
+            pos_lst.append(current_pos)
+
+            current_vel = self.get_one(i, seed)['vel']
+            vel_lst.append(current_vel)
+
+        dictionary = {'pos': pos_lst, 'vel': vel_lst}
+
+        return dictionary
+
+    def get_one(self, idx, seed, get_path_name=False):
+        
+        fname = f'data_{seed}_{idx+self.sample_num}'
+
+        data_path = os.path.join(self.dataset_path, fname)
+
+        data = {}
+        with np.load(data_path + '.npz', 'rb') as raw_data:
+            pos = raw_data['pos'].astype(np.float32)
+            data['pos'] = pos
+            forces = raw_data['forces'].astype(np.float32)
+            data['forces'] = forces
+            vel = raw_data['vel'].astype(np.float32)
+            data['vel'] = vel
+
+        if get_path_name:
+            return data, data_path
+
+        return data

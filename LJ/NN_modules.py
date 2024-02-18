@@ -49,6 +49,10 @@ import wandb
 
 import torch.utils.data as data
 
+from LATENT_ODE.create_latent_ode_model import *
+from torch.distributions.normal import Normal
+import LATENT_ODE.utils as utils
+
 def cubic_kernel(r, re):
     eps = 1e-3
     r = torch.threshold(r, eps, re)
@@ -584,7 +588,7 @@ class RNN(nn.Module):
             nonlinearity='tanh',
         )
 
-        self.linear = nn.Linear(256, 32)
+        self.linear = nn.Linear(hidden_size, input_size)
 
     def forward(self, x):
         output, hn = self.rnn(x)
@@ -592,12 +596,106 @@ class RNN(nn.Module):
 
         return output   
 
+class LSTM(nn.Module):
+
+    def __init__(self, input_size, hidden_size, num_layers, proj_size):
+        super(LSTM, self).__init__()
+
+        self.rnn = nn.LSTM(
+            input_size=input_size,
+            hidden_dim=hidden_size,
+            num_layers=num_layers,
+            proj_size=proj_size,
+            nonlinearity='tanh',
+        )
+
+    def forward(self, x):
+        output, hn = self.rnn(x)
+
+        return output
+
+class Args_latentODE:
+    def __init__(self):
+        self.latents = 32 ## Size of the latent state
+        self.poisson = True ## Model poisson-process likelihood for the density of events in addition to reconstruction
+        self.units = 100 ## Number of units per layer in ODE func
+        self.gen_layers = 2 ## Number of layers in ODE func in generative ODE
+        self.rec_dims = 20 ## Dimensionality of the recognition model (ODE or RNN)
+        self.z0_encoder = 'odernn' ## Type of encoder for Latent ODE model: odernn or rnn
+        self.rec_layers = 1 ## Number of layers in ODE func in recognition ODE
+        self.gru_units = 200 ## Number of units per layer in each of GRU update networks
+
+def create_mask(x, percentage):
+    mask = torch.ones_like(x)
+    num_timesteps = x.size()[0]
+    num_masked_timesteps = int(percentage * num_timesteps)
+    masked_indices = np.sort(np.random.permutation(num_timesteps)[:num_masked_timesteps], axis=None)
+    mask[masked_indices,:] = 0
+
+    not_masked_indices = np.ones(num_timesteps)
+    not_masked_indices[masked_indices] = False
+    not_masked_indices = np.sort(not_masked_indices, axis=None)
+
+    return mask, masked_indices, not_masked_indices
+
+class latentODE(nn.Module):
+
+    def __init__(self, encoding_size, mode):
+        super(latentODE, self).__init__()
+        
+        args = Args_latentODE()
+        device = "cuda"
+        input_dim = encoding_size
+        z0_prior = Normal(torch.Tensor([0.0]).to(device), torch.Tensor([1.]).to(device))
+        obsrv_std = 0.01
+        obsrv_std = torch.Tensor([obsrv_std]).to(device)
+
+        self.latentODE = create_LatentODE_model(args, input_dim, z0_prior, obsrv_std, device)
+        self.mode = mode
+
+    def forward(self, truth, t):
+        if self.mode == 'train': ## try for exrapolation: We encode the observations in the first half forward in time and reconstruct the second half.
+            ## interpolation training
+            mask, masked_indices, not_masked_indices = create_mask(truth, 0.3)
+            truth = mask*truth
+            time_steps_to_predict = t
+            truth_time_steps = t[not_masked_indices]
+            """
+            ## extrapolation training
+            time_steps_to_predict = torch.arange(0,t.size()[0]).to("cuda").float()
+            truth_time_steps = torch.arange(0,int(t.size()[0]/2)).to("cuda").float()
+            ones_tensor = torch.ones(truth.size()).to("cuda")
+            zeros_tensor = torch.zeros(truth.size()).to("cuda")
+            truth = torch.cat((truth, zeros_tensor))
+            mask = torch.cat((ones_tensor, zeros_tensor))
+            """
+
+        if self.mode == 'test':
+            time_steps_to_predict = torch.arange(0,2*t.size()[0]).to("cuda").float()
+            truth_time_steps = torch.arange(0,t.size()[0]).to("cuda").float()
+            ones_tensor = torch.ones(truth.size()).to("cuda")
+            zeros_tensor = torch.zeros(truth.size()).to("cuda")
+            truth = torch.cat((truth, zeros_tensor))
+            mask = torch.cat((ones_tensor, zeros_tensor))
+
+        output, extra_info = self.latentODE.get_reconstruction(time_steps_to_predict,
+                                            truth.permute(1, 0, 2),
+                                            truth_time_steps,
+                                            mask = mask.permute(1, 0, 2),
+                                            n_traj_samples = 1,
+                                            run_backwards = True,
+                                            mode = None)
+
+        return output
+
 
 class EntireModel(nn.Module):
     def __init__(self,
                 encoding_size,
                 out_feats,
                 box_size,   # can also be array
+                mode,
+                architecture,
                 hidden_dim=128,
                 conv_layer=2,
                 edge_embedding_dim=32,
@@ -608,6 +706,8 @@ class EntireModel(nn.Module):
 
         PATH1 = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/AUTOENCODER/encoder_checkpoint_29.ckpt'
         PATH2 = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/AUTOENCODER/decoder_checkpoint_29.ckpt'
+
+        self.encoding_size = encoding_size
 
         self.encoder = Encoder(encoding_size,
                     out_feats,
@@ -620,8 +720,18 @@ class EntireModel(nn.Module):
                     use_layer_norm=False).load_from_checkpoint(PATH1)
 
         self.encoder.freeze()
+
+        self.architecture = architecture
         
-        self.neuralODE = ODEBlock(f1(encoding_size))
+        if architecture == 'node':
+            self.neuralODE = ODEBlock(f1(encoding_size))
+
+        if architecture == 'latentode':
+            self.latentODE = latentODE(encoding_size, mode)
+
+        if architecture == 'recurrent':
+            self.recurrent = RNN(input_size = encoding_size, hidden_size = 256, num_layers=8)
+            #self.recurrent = LSTM(input_size = encoding_size, hidden_size = 256, num_layers=8, proj_size = encoding_size)
 
         self.decoder = Decoder(
                     encoding_size,
@@ -639,9 +749,16 @@ class EntireModel(nn.Module):
                 t,
                 ):
 
-        encode_first = self.encoder(fluid_pos_lst, fluid_edge_lst, fluid_vel_lst)
+        encoded = self.encoder(fluid_pos_lst, fluid_edge_lst, fluid_vel_lst).view(len(fluid_pos_lst), 258, self.encoding_size)
 
-        to_decode = self.neuralODE(encode_first, t)
+        if self.architecture == 'node':
+            to_decode = self.neuralODE(encoded, t)
+        
+        if self.architecture == 'latentode':
+            to_decode = self.latentODE(encoded, t).squeeze(0).permute(1,0,2)
+        
+        if self.architecture == 'recurrent':
+            to_decode = self.recurrent(encoded)
 
         h, pos_result, vel_result = self.decoder(to_decode)
 
@@ -657,7 +774,7 @@ class Autoencoder(nn.Module):
                 edge_embedding_dim=32,
                 dropout=0.1,
                 drop_edge=True,
-                use_layer_norm=False):
+                use_layer_norm=False,):
         super(Autoencoder, self).__init__()
 
         self.encoder = Encoder(encoding_size,

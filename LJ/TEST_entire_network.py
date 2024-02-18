@@ -26,14 +26,16 @@ import torch.nn as nn
 from einops import rearrange
 from scipy.spatial import cKDTree
 from sklearn.metrics import mean_squared_error
-
 from mpl_toolkits.mplot3d import Axes3D
-
 from train_ENTIRE_NETWORK import *
 
-def network_trajectory(start_pos, start_vel,t):
-    PATH = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/ENTIRE_NETWORK_emb+cord/checkpoint_100.ckpt'
-    SCALER_CKPT = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/ENTIRE_NETWORK_emb+cord/scaler_100.npz'
+num_particles = 258
+BOX_SIZE = 27.27
+box_size = np.array([BOX_SIZE, BOX_SIZE, BOX_SIZE])
+
+def network_trajectory(start_pos, start_vel, t, architecture, cp_name, epoch):
+    PATH = f'/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/{cp_name}/checkpoint_{epoch}.ckpt'
+    SCALER_CKPT = f'/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/{cp_name}/scaler_{epoch}.npz'
     args = SimpleNamespace(use_layer_norm=False,
                         encoding_size=32,
                         hidden_dim=128,
@@ -44,14 +46,13 @@ def network_trajectory(start_pos, start_vel,t):
                         update_edge=False,
                         use_part=False,
                         data_dir='',
+                        mode = 'test',
+                        architecture = architecture,
                         loss='mse')
     model = ParticleNetLightning(args).load_from_checkpoint(PATH, args=args)
     model.load_training_stats(SCALER_CKPT)
     model.cuda()
     model.eval()
-
-
-    ## which one to start with
 
     with torch.no_grad():
 
@@ -69,8 +70,6 @@ def rdf_func(coords, box_size, dr=0.1, r_max=None):
     
     # Initialize g_r with zeros
     g_r = np.zeros_like(hist, dtype=float)
-
-    print("Hejhej")
 
     # Correct for periodic boundary conditions
     tree = cKDTree(coords, boxsize=box_size)
@@ -93,255 +92,186 @@ def rdf_func(coords, box_size, dr=0.1, r_max=None):
 
     return g_r, radii[:-1]  # Exclude the last bin edge for plotting
 
-num_particles = 258
-BOX_SIZE = 27.27
-box_size = np.array([BOX_SIZE, BOX_SIZE, BOX_SIZE])
-
-t_start = 400
-t = 99
-
-start_all = np.load(f'md_dataset/lj_data_to_test/data_0_{t_start}.npz')
-start_pos = start_all['pos']
-start_vel = start_all['vel']
-
-trajectory_real = []
-trajectory_model = []
-
-for i in range(t_start,t+t_start):
-    everything = np.load(f'md_dataset/lj_data_to_test/data_0_{i}.npz')
-    just_pos = everything['pos']
-    trajectory_real.append(just_pos)
-
-trajectory_model = network_trajectory(start_pos, start_vel, t)
-
-#trajectory_model[1:] = [tensor.detach().cpu().numpy() for tensor in trajectory_model[1:]]
-
-trajectory_real_np= np.stack(trajectory_real, axis=0)
-trajectory_model_np = trajectory_model
-
-trajectory_model_np = np.mod(trajectory_model_np,BOX_SIZE)
-
-trajectory_real_tensor = torch.tensor(trajectory_real_np)
-trajectory_model_tensor = torch.tensor(trajectory_model_np)
-
-loss = nn.MSELoss()(trajectory_real_tensor,trajectory_model_tensor)
-
-print("Loss is:")
-print(loss)
-
-print("Difference is:")
-print(trajectory_model_np-trajectory_real_np)
-
-t_for_rdf = 50
-
 ## for one time snapshot
+def rdf_graph_one_snapshot(t,trajectory_real_np, trajectory_model_np, directory, epoch):
 
-if (t_for_rdf>t): print("Time for rdf has to be smaller than t")
+    # Calculate RDF with periodic boundary conditions
+    g_r_real, radii_real = rdf_func(trajectory_real_np[t], box_size, dr=0.1)
 
-print("Size of trajectory real:")
-print(trajectory_real_np.shape[0])
+    # Plot RDF
+    plt.plot(radii_real, g_r_real, label='Real Data')
+    plt.xlabel('Distance')
+    plt.ylabel('Radial Distribution Function (RDF)')
+    plt.legend()
+    #plt.savefig('rdf_graph_real.png')
 
-# Calculate RDF with periodic boundary conditions
-g_r_real, radii_real = rdf_func(trajectory_real_np[t_for_rdf], box_size, dr=0.1)
+    trajectory_model_np = np.mod(trajectory_model_np,BOX_SIZE)
 
+    g_r_model, radii_model = rdf_func(trajectory_model_np[t], box_size, dr=0.1)
 
-# Plot RDF
-plt.plot(radii_real, g_r_real, label='Real Data')
-plt.xlabel('Distance')
-plt.ylabel('Radial Distribution Function (RDF)')
-plt.legend()
-#plt.savefig('rdf_graph_real.png')
-
-trajectory_model_np = np.mod(trajectory_model_np,BOX_SIZE)
-
-print("idk anymore")
-print(trajectory_real_np.shape)
-
-g_r_model, radii_model = rdf_func(trajectory_model_np[t_for_rdf], box_size, dr=0.1)
-
-# Plot RDF
-plt.plot(radii_model, g_r_model)#, label='Model Data 1')
-plt.xlabel('Distance')
-plt.ylabel('Radial Distribution Function (RDF)')
-plt.legend()
-plt.savefig('results_rdf_graphs_WHOLE_emb+cord/rdfgraph_emb_(t=50)_(epoch=100).png')
-
-print("Finished")
-
-plt.close()
+    # Plot RDF
+    plt.plot(radii_model, g_r_model)#, label='Model Data 1')
+    plt.xlabel('Distance')
+    plt.ylabel('Radial Distribution Function (RDF)')
+    plt.legend()
+    plt.savefig(f"{directory}/rdfgraph_(t={t})_(epoch={epoch}).png")
+    plt.close()
 
 
 ## an average of multiple snapshots
+def rdf_graph_multiple_snapshots(t_start, t_end, trajectory_real_np, trajectory_model_np, directory, epoch):
+    g_r_real_all = []
+    g_r_model_all = []
 
-t_for_rdf = 0
-t_for_rdf_end = 99
+    trajectory_real_np = np.mod(trajectory_real_np,BOX_SIZE)
 
-g_r_real_all = []
-g_r_model_all = []
+    for i in range (t_start, t_end):
+        # Calculate RDF with periodic boundary conditions
+        g_r_real, radii_real = rdf_func(trajectory_real_np[i], box_size, dr=0.1)
+        g_r_real_all.append(g_r_real)
 
-trajectory_real_np = np.mod(trajectory_real_np,BOX_SIZE)
+    g_r_real_average = np.mean(g_r_real_all, axis=0)
 
-for i in range (t_for_rdf, t_for_rdf_end):
-    # Calculate RDF with periodic boundary conditions
-    g_r_real, radii_real = rdf_func(trajectory_real_np[i], box_size, dr=0.1)
-    g_r_real_all.append(g_r_real)
+    # Plot RDF
+    plt.plot(radii_real, g_r_real_average, label='Real Data')
+    plt.xlabel('Distance')
+    plt.ylabel('Average Radial Distribution Function (RDF)')
+    plt.legend()
+    #plt.savefig('rdf_graph_real.png')
 
+    trajectory_model_np = np.mod(trajectory_model_np,BOX_SIZE)
 
-g_r_real_average = np.mean(g_r_real_all, axis=0)
+    for j in range (t_start, t_end):
+        # Calculate RDF with periodic boundary conditions
+        g_r_model, radii_model = rdf_func(trajectory_model_np[j], box_size, dr=0.1)
+        g_r_model_all.append(g_r_model)
 
-# Plot RDF
-plt.plot(radii_real, g_r_real_average, label='Real Data')
-plt.xlabel('Distance')
-plt.ylabel('Average Radial Distribution Function (RDF)')
-plt.legend()
-#plt.savefig('rdf_graph_real.png')
+    g_r_model_average = np.mean(g_r_model_all, axis=0)
 
+    # Plot RDF
+    plt.plot(radii_model, g_r_model_average, label='Model Data')
+    plt.xlabel('Distance')
+    plt.ylabel('Average Radial Distribution Function (RDF)')
+    plt.legend()
+    plt.xlim(0,14)
+    plt.ylim(0,0.05)
 
+    plt.savefig(f"{directory}/rdfgraph_(t={t_start}-{t_end})_(epoch={epoch}).png")
+    plt.close()
 
-trajectory_model_np = np.mod(trajectory_model_np,BOX_SIZE)
-
-for j in range (t_for_rdf, t_for_rdf_end):
-    # Calculate RDF with periodic boundary conditions
-    g_r_model, radii_model = rdf_func(trajectory_model_np[j], box_size, dr=0.1)
-    g_r_model_all.append(g_r_model)
-
-g_r_model_average = np.mean(g_r_model_all, axis=0)
-
-# Plot RDF
-plt.plot(radii_model, g_r_model_average, label='Model Data')
-plt.xlabel('Distance')
-plt.ylabel('Average Radial Distribution Function (RDF)')
-plt.legend()
-plt.savefig('results_rdf_graphs_WHOLE_emb+cord/rdfgraph_emb_(t=0-99)_(epoch=100).png')
-
-np.save('first_trajectory.npy', trajectory_model_np)
-
-print("Finished")
 
 ### visualize the trajectory of one particle
+def plot_of_trajectory(particle_num, time_start, time_final, trajectory_real_np, trajectory_model_np, directory):
 
-particle_n = 88
+    trajectory_of1_real = trajectory_real_np[time_start:time_final,particle_num,:]
+    trajectory_of1_model = trajectory_model_np[time_start:time_final,particle_num,:]
 
-time_final = 50
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    ax.plot(trajectory_of1_real[:, 0], trajectory_of1_real[:, 1], trajectory_of1_real[:, 2], label=f'Particle {particle_num + 1}')
+    ax.set_xlabel('X-axis')
+    ax.set_ylabel('Y-axis')
+    ax.set_zlabel('Z-axis')
+    ax.set_title(f'Trajectory of Particle {particle_num + 1} over Time')
+    ax.legend()
+    fig.savefig(f"{directory}/Trajectory of {particle_num + 1} (real) from t={time_start} to t={time_final}")
 
-trajectory_of1_real = trajectory_real_np[0:time_final,particle_n,:]
-print("Size of trjectory (should be len(t)*3)")
-print(trajectory_of1_real.size)
-trajectory_of1_model = trajectory_model_np[0:time_final:,particle_n,:]
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    ax.plot(trajectory_of1_model[:, 0], trajectory_of1_model[:, 1], trajectory_of1_model[:, 2], label=f'Particle {particle_num + 1}')
+    ax.set_xlabel('X-axis')
+    ax.set_ylabel('Y-axis')
+    ax.set_zlabel('Z-axis')
+    ax.set_title(f'Trajectory of Particle {particle_num + 1} over Time')
+    ax.legend()
+    fig.savefig(f"{directory}/Trajectory of {particle_num + 1} (model) from t={time_start} to t={time_final}")
 
-fig = plt.figure()
-ax = fig.add_subplot(111, projection='3d')
-ax.plot(trajectory_of1_real[:, 0], trajectory_of1_real[:, 1], trajectory_of1_real[:, 2], label=f'Particle {particle_n + 1}')
-ax.set_xlabel('X-axis')
-ax.set_ylabel('Y-axis')
-ax.set_zlabel('Z-axis')
-ax.set_title(f'Trajectory of Particle (one) {particle_n + 1} over Time + vel')
-ax.legend()
-fig.savefig(f"(new) Trjectory of {particle_n + 1} (real)")
+def test_main(args):
+    t_from = args.t_from
+    t_how_many = args.t_how_many
+    t_rdf_one_snapshot = args.t_rdf_one_snapshot
+    t_rdf_multiple_snapshots_start = args.t_rdf_multiple_snapshots_start
+    t_rdf_multiple_snapshots_end = args.t_rdf_multiple_snapshots_end
+    cp_name = args.cp_name
+    epoch = args.epoch
+    architecture = args.architecture
 
-fig = plt.figure()
-ax = fig.add_subplot(111, projection='3d')
-ax.plot(trajectory_of1_model[:, 0], trajectory_of1_model[:, 1], trajectory_of1_model[:, 2], label=f'Particle {particle_n + 1}')
-ax.set_xlabel('X-axis')
-ax.set_ylabel('Y-axis')
-ax.set_zlabel('Z-axis')
-ax.set_title(f'Trajectory of Particle (one) {particle_n + 1} over Time + vel')
-ax.legend()
-fig.savefig(f"(new) Trjectory of {particle_n + 1} (model)")
+    directory = os.path.join('results_all',f'results_{cp_name}_epoch={epoch}')
+    os.makedirs(directory, exist_ok=True)
 
-print(trajectory_of1_model)
-print(trajectory_of1_real)
+    start_pos = []
+    start_vel = []
 
-particle_n = 3
+    if architecture == 'node' or architecture == 'recurrent':
+        start_all = np.load(f'md_dataset/lj_data_to_test/data_0_{t_from}.npz')
+        start_pos = start_all['pos']
+        start_vel = start_all['vel']
 
-time_final = 50
+    if architecture == 'latentode':
+        for i in range (t_from,t_from+int(t_how_many/2)):
+            start_all = np.load(f'md_dataset/lj_data_to_test/data_0_{i}.npz')
+            start_pos.append(start_all['pos'])
+            start_vel.append(start_all['vel'])
 
-trajectory_of1_real = trajectory_real_np[0:time_final,particle_n,:]
-trajectory_of1_model = trajectory_model_np[0:time_final:,particle_n,:]
+    trajectory_real = []
+    trajectory_model = []
 
-fig = plt.figure()
-ax = fig.add_subplot(111, projection='3d')
-ax.plot(trajectory_of1_real[:, 0], trajectory_of1_real[:, 1], trajectory_of1_real[:, 2], label=f'Particle {particle_n + 1}')
-ax.set_xlabel('X-axis')
-ax.set_ylabel('Y-axis')
-ax.set_zlabel('Z-axis')
-ax.set_title(f'Trajectory of Particle (one) {particle_n + 1} over Time + vel')
-ax.legend()
-fig.savefig(f"(new) Trjectory of {particle_n + 1} (real)")
+    for i in range(t_from,t_from+t_how_many):
+        everything = np.load(f'md_dataset/lj_data_to_test/data_0_{i}.npz')
+        just_pos = everything['pos']
+        trajectory_real.append(just_pos)
 
-fig = plt.figure()
-ax = fig.add_subplot(111, projection='3d')
-ax.plot(trajectory_of1_model[:, 0], trajectory_of1_model[:, 1], trajectory_of1_model[:, 2], label=f'Particle {particle_n + 1}')
-ax.set_xlabel('X-axis')
-ax.set_ylabel('Y-axis')
-ax.set_zlabel('Z-axis')
-ax.set_title(f'Trajectory of Particle (one) {particle_n + 1} over Time + vel')
-ax.legend()
-fig.savefig(f"(new) Trjectory of {particle_n + 1} (model)")
+    trajectory_model = network_trajectory(start_pos, start_vel, t_how_many, architecture, cp_name, epoch)
 
-print(trajectory_of1_model)
-print(trajectory_of1_real)
+    trajectory_real_np= np.stack(trajectory_real, axis=0)
+    trajectory_model_np = trajectory_model
 
-particle_n = 106
+    trajectory_model_np = np.mod(trajectory_model_np,BOX_SIZE)
 
-time_final = 50
+    trajectory_real_tensor = torch.tensor(trajectory_real_np)
+    trajectory_model_tensor = torch.tensor(trajectory_model_np)
 
-trajectory_of1_real = trajectory_real_np[0:time_final,particle_n,:]
-print("Size of trjectory (should be len(t)*3)")
-print(trajectory_of1_real.size)
-trajectory_of1_model = trajectory_model_np[0:time_final:,particle_n,:]
+    loss = nn.MSELoss()(trajectory_real_tensor,trajectory_model_tensor)
 
-fig = plt.figure()
-ax = fig.add_subplot(111, projection='3d')
-ax.plot(trajectory_of1_real[:, 0], trajectory_of1_real[:, 1], trajectory_of1_real[:, 2], label=f'Particle {particle_n + 1}')
-ax.set_xlabel('X-axis')
-ax.set_ylabel('Y-axis')
-ax.set_zlabel('Z-axis')
-ax.set_title(f'Trajectory of Particle (one) {particle_n + 1} over Time + vel')
-ax.legend()
-fig.savefig(f"(new) Trjectory of {particle_n + 1} (real)")
+    print("Loss is:")
+    print(loss)
 
-fig = plt.figure()
-ax = fig.add_subplot(111, projection='3d')
-ax.plot(trajectory_of1_model[:, 0], trajectory_of1_model[:, 1], trajectory_of1_model[:, 2], label=f'Particle {particle_n + 1}')
-ax.set_xlabel('X-axis')
-ax.set_ylabel('Y-axis')
-ax.set_zlabel('Z-axis')
-ax.set_title(f'Trajectory of Particle (one) {particle_n + 1} over Time + vel')
-ax.legend()
-fig.savefig(f"(new) Trjectory of {particle_n + 1} (model)")
+    print("Difference is:")
+    print(trajectory_model_np-trajectory_real_np)
 
-print(trajectory_of1_model)
-print(trajectory_of1_real)
+    ## plot rdf graphs
 
-particle_n = 9
+    rdf_graph_one_snapshot(t_rdf_one_snapshot, trajectory_real_np, trajectory_model_np, directory, epoch)
+    rdf_graph_multiple_snapshots(t_rdf_multiple_snapshots_start, t_rdf_multiple_snapshots_end, trajectory_real_np, trajectory_model_np, directory, epoch)
 
-time_final = 50
+    ## plot particle trajectories
+    
+    plot_of_trajectory(10, t_rdf_multiple_snapshots_start, t_rdf_multiple_snapshots_end, trajectory_real_np, trajectory_model_np, directory)
+    plot_of_trajectory(50, t_rdf_multiple_snapshots_start, t_rdf_multiple_snapshots_end, trajectory_real_np, trajectory_model_np, directory)
+    plot_of_trajectory(88, t_rdf_multiple_snapshots_start, t_rdf_multiple_snapshots_end, trajectory_real_np, trajectory_model_np, directory)
+    plot_of_trajectory(100, t_rdf_multiple_snapshots_start, t_rdf_multiple_snapshots_end, trajectory_real_np, trajectory_model_np, directory)
+    plot_of_trajectory(199, t_rdf_multiple_snapshots_start, t_rdf_multiple_snapshots_end, trajectory_real_np, trajectory_model_np, directory)
 
-trajectory_of1_real = trajectory_real_np[0:time_final,particle_n,:]
-print("Size of trjectory (should be len(t)*3)")
-print(trajectory_of1_real.size)
-trajectory_of1_model = trajectory_model_np[0:time_final:,particle_n,:]
+    ## save trajectory data
+    file_path = os.path.join(directory, f'trajectory_data_t=0-{t_how_many}')
+    np.save(file_path, trajectory_model_np)
 
-fig = plt.figure()
-ax = fig.add_subplot(111, projection='3d')
-ax.plot(trajectory_of1_real[:, 0], trajectory_of1_real[:, 1], trajectory_of1_real[:, 2], label=f'Particle {particle_n + 1}')
-ax.set_xlabel('X-axis')
-ax.set_ylabel('Y-axis')
-ax.set_zlabel('Z-axis')
-ax.set_title(f'Trajectory of Particle (one) {particle_n + 1} over Time + vel')
-ax.legend()
-fig.savefig(f"(new) Trjectory of {particle_n + 1} (real) (whole)")
 
-fig = plt.figure()
-ax = fig.add_subplot(111, projection='3d')
-ax.plot(trajectory_of1_model[:, 0], trajectory_of1_model[:, 1], trajectory_of1_model[:, 2], label=f'Particle {particle_n + 1}')
-ax.set_xlabel('X-axis')
-ax.set_ylabel('Y-axis')
-ax.set_zlabel('Z-axis')
-ax.set_title(f'Trajectory of Particle (one) {particle_n + 1} over Time + vel')
-ax.legend()
-fig.savefig(f"(new) Trjectory of {particle_n + 1} (model) (whole)")
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--t_from', default = 400, type=int)
+    parser.add_argument('--t_how_many', default = 100, type=int)
+    parser.add_argument('--t_rdf_one_snapshot', default=75, type=int)
+    parser.add_argument('--t_rdf_multiple_snapshots_start', default=50, type=int)  
+    parser.add_argument('--t_rdf_multiple_snapshots_end', default=100, type=int)   
+    parser.add_argument('--cp_name', default='ENTIRE_NETWORK_latentODE_extrap')
+    parser.add_argument('--epoch', default=100, type=int)
+    parser.add_argument('--architecture', default='latentode', type=str)
+    args = parser.parse_args()
+    test_main(args)
 
-print(trajectory_of1_model)
-print(trajectory_of1_real)
+
+if __name__ == '__main__':
+    main()
+
+
