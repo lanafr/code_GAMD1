@@ -1,3 +1,7 @@
+###########################
+# Encoder part of this code was partially taken from GAMD (https://arxiv.org/abs/2112.03383, Li, Zijie and Meidani, Kazem and Yadav, Prakarsh and Barati Farimani, Amir, 2022.)
+###########################
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -38,7 +42,7 @@ from pytorch_lightning.loggers import WandbLogger
 from torchdiffeq import odeint, odeint_adjoint
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '../'))
-from nn_module import SimpleMDNetNew
+#from nn_module import SimpleMDNetNew
 from train_utils_seq import Sequential_data, Some_seq_data, just_a_sequence
 from graph_utils import NeighborSearcher, graph_network_nbr_fn
 import time
@@ -344,8 +348,8 @@ class Encoder(nn.Module):  # no bond, no learnable node encoder
         self.box_size = self.box_size
         half_ec = int(encoding_size/2)
 
-        self.node_encoder = MLP(3, half_ec, hidden_layer=2, hidden_dim=128, activation='leaky_relu')
-        self.vel_encoder = MLP(3, half_ec, hidden_layer=2, hidden_dim=128, activation='leaky_relu')
+        self.node_encoder = MLP(3, encoding_size, hidden_layer=2, hidden_dim=128, activation='leaky_relu')
+        #self.vel_encoder = MLP(3, half_ec, hidden_layer=2, hidden_dim=128, activation='leaky_relu')
         #self.node_dencoder = MLP(64, 3, hidden_layer=2, hidden_dim=hidden_dim, activation='leaky_relu')
         self.edge_encoder = MLP(3 + 1 + len(self.edge_expand.centers), self.edge_emb_dim, hidden_dim=hidden_dim,
                                 activation='leaky_relu')
@@ -430,11 +434,12 @@ class Encoder(nn.Module):  # no bond, no learnable node encoder
         #add node embeddings
         #fluid_graph.ndata['e'] = fluid_pos
         positions_encoded = self.node_encoder(fluid_pos)
-        velocities_encoded = self.vel_encoder(fluid_vel)
+        #velocities_encoded = self.vel_encoder(fluid_vel)
         
-        new_node = torch.cat((positions_encoded, velocities_encoded), axis=1)
-        fluid_graph.ndata['e'] = new_node
+        #new_node = torch.cat((positions_encoded, velocities_encoded), axis=1)
+        #fluid_graph.ndata['e'] = new_node
         #fluid_graph.ndata['e'] = positions_encoded + velocities_encoded
+        fluid_graph.ndata['e'] = positions_encoded
 
         #graph_to_save = dgl.graph((neigh_idx, center_idx))
         #graph_to_save.ndata['e'] = self.node_encoder(fluid_pos)
@@ -514,17 +519,19 @@ class Decoder(nn.Module):
 
         self.decode_MLP = MLP(encoding_size, out_feats, hidden_layer=3, hidden_dim=256, activation='leaky_relu')
         self.decode_vel = MLP(encoding_size, out_feats, hidden_layer=3, hidden_dim=256, activation='leaky_relu')
+        self.decode_forces = MLP(encoding_size, out_feats, hidden_layer=3, hidden_dim=256, activation='leaky_relu')
         
     def gdecoder_MLP(self, h: torch.Tensor):
 
         out = self.decode_MLP(h)
         vel = self.decode_vel(h)
-        return h, out, vel
+        forces = self.decode_forces(h)
+        return h, out, vel, forces
 
     def forward(self, h:torch.Tensor):
 
-        h, out, vel = self.gdecoder_MLP(h)
-        return h, out, vel
+        h, out, vel, forces = self.gdecoder_MLP(h)
+        return h, out, vel, forces
 
     def load_from_checkpoint(self, checkpoint_path):
         # Your loading logic here
@@ -618,11 +625,11 @@ class Args_latentODE:
     def __init__(self):
         self.latents = 32 ## Size of the latent state
         self.poisson = True ## Model poisson-process likelihood for the density of events in addition to reconstruction
-        self.units = 100 ## Number of units per layer in ODE func
-        self.gen_layers = 2 ## Number of layers in ODE func in generative ODE
-        self.rec_dims = 20 ## Dimensionality of the recognition model (ODE or RNN)
+        self.units = 200 ## Number of units per layer in ODE func
+        self.gen_layers = 4 ## Number of layers in ODE func in generative ODE
+        self.rec_dims = 32 ## Dimensionality of the recognition model (ODE or RNN)
         self.z0_encoder = 'odernn' ## Type of encoder for Latent ODE model: odernn or rnn
-        self.rec_layers = 1 ## Number of layers in ODE func in recognition ODE
+        self.rec_layers = 4 ## Number of layers in ODE func in recognition ODE
         self.gru_units = 200 ## Number of units per layer in each of GRU update networks
 
 def create_mask(x, percentage):
@@ -654,7 +661,8 @@ class latentODE(nn.Module):
         self.mode = mode
 
     def forward(self, truth, t):
-        if self.mode == 'train': ## try for exrapolation: We encode the observations in the first half forward in time and reconstruct the second half.
+        if self.mode == 'train':
+            """
             ## interpolation training
             mask, masked_indices, not_masked_indices = create_mask(truth, 0.3)
             truth = mask*truth
@@ -668,7 +676,6 @@ class latentODE(nn.Module):
             zeros_tensor = torch.zeros(truth.size()).to("cuda")
             truth = torch.cat((truth, zeros_tensor))
             mask = torch.cat((ones_tensor, zeros_tensor))
-            """
 
         if self.mode == 'test':
             time_steps_to_predict = torch.arange(0,2*t.size()[0]).to("cuda").float()
@@ -760,7 +767,7 @@ class EntireModel(nn.Module):
         if self.architecture == 'recurrent':
             to_decode = self.recurrent(encoded)
 
-        h, pos_result, vel_result = self.decoder(to_decode)
+        h, pos_result, vel_result, forces = self.decoder(to_decode)
 
         return pos_result, vel_result, h
 
@@ -770,7 +777,7 @@ class Autoencoder(nn.Module):
                 out_feats,
                 box_size,   # can also be array
                 hidden_dim=128,
-                conv_layer=2,
+                conv_layer=4,
                 edge_embedding_dim=32,
                 dropout=0.1,
                 drop_edge=True,
@@ -781,7 +788,7 @@ class Autoencoder(nn.Module):
                     out_feats,
                     box_size,   # can also be array
                     hidden_dim=128,
-                    conv_layer=2,
+                    conv_layer=4,
                     edge_embedding_dim=32,
                     dropout=0.1,
                     drop_edge=True,
@@ -802,9 +809,9 @@ class Autoencoder(nn.Module):
 
         embed = self.encoder(fluid_pos_lst, fluid_edge_lst, fluid_vel_lst)
 
-        h, pos_result, vel_result = self.decoder(embed)
+        h, pos_result, vel_result, forces_result = self.decoder(embed)
 
-        return pos_result, vel_result
+        return pos_result, vel_result, forces_result
 
 ## TO DO: fix RNN
 
@@ -821,8 +828,8 @@ class RNN_entireModel(nn.Module):
                 use_layer_norm=False):
         super(EntireModel, self).__init__()
 
-        PATH1 = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/AUTOENCODER/encoder_checkpoint_29.ckpt'
-        PATH2 = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/AUTOENCODER/decoder_checkpoint_29.ckpt'
+        PATH1 = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/AUTOENCODER_1ts(cords)/encoder_checkpoint_39.ckpt'
+        PATH2 = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/AUTOENCODER_1ts(cords)/decoder_checkpoint_39.ckpt'
 
         self.encoder = Encoder(encoding_size,
                     out_feats,

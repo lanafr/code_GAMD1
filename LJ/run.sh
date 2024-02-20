@@ -53,7 +53,7 @@ export WANDB_API_KEY=75b2f740e6817e165e204770a9185c4c98ba649d
 export PATH="/home/guests/lana_frkin/.local/bin:$PATH"
 #python train_network_lj.py # --cuda
 #python train_endtoend_autoencoder_nice.py
-#python generate_graphs.py
+#python lets_see.py
 #python test_script/visualize_graph.py
 #python generate_lj_data.py
 #python the_sequential_network1.py
@@ -61,8 +61,8 @@ export PATH="/home/guests/lana_frkin/.local/bin:$PATH"
 #python seqn_2_decoderincluded.py
 #python entire_network_test.py
 #python entire_network.py
-#python train_AUTOENCODER.py
-python train_ENTIRE_NETWORK.py --mode train --architecture latentode
+python train_AUTOENCODER.py
+#python train_ENTIRE_NETWORK.py --mode train --architecture latentode
 #python RNN_sequential_network.py
 #python entire_network_RNN.py
-#python TEST_entire_network.py
+#python TEST_entire_network.py --epoch 60 #--cp_name ENTIRE_NETWORK_latentODE_extrap_1ts-100t --epoch 2620

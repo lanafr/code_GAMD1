@@ -50,7 +50,7 @@ def center_positions(pos):
 
 BOX_SCALE = 2
 DT = 2
-for seed in range(131,2000):
+for seed in range(0,1):
     print(f'Running seed: {seed}')
     P_NUM = 258
     fluid = testsystems.LennardJonesFluid(nparticles=P_NUM, reduced_density=0.50, shift=True)
@@ -83,14 +83,14 @@ for seed in range(131,2000):
     simulation.minimizeEnergy(tolerance=1*unit.kilojoule/unit.mole)
     simulation.step(1)
 
-    os.makedirs(f'./md_dataset/lj_data_less_timesteps/', exist_ok=True)
-    dataReporter_gt = StateDataReporter(f'./log_nvt_lj.txt', 50, totalSteps=5000,
+    os.makedirs(f'./md_dataset/lj_data_1ts_to_test/', exist_ok=True)
+    dataReporter_gt = StateDataReporter(f'./log_nvt_lj.txt', 1, totalSteps=20000,
         step=True, time=True, speed=True, progress=True, elapsedTime=True, remainingTime=True,
         potentialEnergy=True, kineticEnergy=True, totalEnergy=True, temperature=True,
                                      separator='\t')
     simulation.reporters.append(dataReporter_gt)
 
-    for t in range(100):
+    for t in range(2000):
         if (t+1)%100 == 0:
             print(f'Finished {(t+1)*10} steps')
         state = simulation.context.getState(getPositions=True,
@@ -100,11 +100,11 @@ for seed in range(131,2000):
         pos = state.getPositions(asNumpy=True).value_in_unit(unit.angstrom)
         vel = state.getVelocities(asNumpy=True).value_in_unit(unit.meter / unit.second)
         force = state.getForces(asNumpy=True).value_in_unit(unit.kilojoules_per_mole/unit.nanometer)
-        np.savez(f'./md_dataset/lj_data_less_timesteps/data_{seed}_{t}.npz',
+        np.savez(f'./md_dataset/lj_data_1ts_to_test/data_{seed}_{t}.npz',
                  pos=pos,
                  vel=vel,
                  forces=force)
-        simulation.step(50)
+        simulation.step(1)
     box_vectors = state.getPeriodicBoxVectors(asNumpy=True).value_in_unit(unit.angstrom)
     print("Box Vectors:")
     print(box_vectors)

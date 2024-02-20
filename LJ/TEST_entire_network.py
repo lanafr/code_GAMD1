@@ -15,8 +15,6 @@ sys.path.append('/home/guests/lana_frkin/GAMDplus/code')
 sys.path.append('/home/guests/lana_frkin/GAMDplus/code/LJ')
 print(sys.path)
 
-from nn_module import SimpleMDNetNew_GAMD, SimpleMDNetNew
-from train_endtoend_autoencoder_nice import ParticleNetLightning
 import torch
 import numpy as np
 from torch.utils.data import DataLoader
@@ -33,7 +31,7 @@ num_particles = 258
 BOX_SIZE = 27.27
 box_size = np.array([BOX_SIZE, BOX_SIZE, BOX_SIZE])
 
-def network_trajectory(start_pos, start_vel, t, architecture, cp_name, epoch):
+def network_trajectory(start_pos, start_vel, t, architecture1, cp_name, epoch):
     PATH = f'/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/{cp_name}/checkpoint_{epoch}.ckpt'
     SCALER_CKPT = f'/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/{cp_name}/scaler_{epoch}.npz'
     args = SimpleNamespace(use_layer_norm=False,
@@ -47,9 +45,9 @@ def network_trajectory(start_pos, start_vel, t, architecture, cp_name, epoch):
                         use_part=False,
                         data_dir='',
                         mode = 'test',
-                        architecture = architecture,
+                        architecture = architecture1,
                         loss='mse')
-    model = ParticleNetLightning(args).load_from_checkpoint(PATH, args=args)
+    model = MDSimNet(args).load_from_checkpoint(PATH, args=args)
     model.load_training_stats(SCALER_CKPT)
     model.cuda()
     model.eval()
@@ -57,6 +55,7 @@ def network_trajectory(start_pos, start_vel, t, architecture, cp_name, epoch):
     with torch.no_grad():
 
         trajectory = model.run_the_network(start_pos, start_vel, t)
+        print(model.get_temp_pairs(torch.tensor(trajectory)))
 
     return trajectory
 
@@ -168,23 +167,14 @@ def plot_of_trajectory(particle_num, time_start, time_final, trajectory_real_np,
 
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
-    ax.plot(trajectory_of1_real[:, 0], trajectory_of1_real[:, 1], trajectory_of1_real[:, 2], label=f'Particle {particle_num + 1}')
+    ax.plot(trajectory_of1_real[:, 0], trajectory_of1_real[:, 1], trajectory_of1_real[:, 2], label=f'Real Data, Particle {particle_num + 1}')
+    ax.plot(trajectory_of1_model[:, 0], trajectory_of1_model[:, 1], trajectory_of1_model[:, 2], label=f'Model Data, Particle {particle_num + 1}')
     ax.set_xlabel('X-axis')
     ax.set_ylabel('Y-axis')
     ax.set_zlabel('Z-axis')
     ax.set_title(f'Trajectory of Particle {particle_num + 1} over Time')
     ax.legend()
-    fig.savefig(f"{directory}/Trajectory of {particle_num + 1} (real) from t={time_start} to t={time_final}")
-
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-    ax.plot(trajectory_of1_model[:, 0], trajectory_of1_model[:, 1], trajectory_of1_model[:, 2], label=f'Particle {particle_num + 1}')
-    ax.set_xlabel('X-axis')
-    ax.set_ylabel('Y-axis')
-    ax.set_zlabel('Z-axis')
-    ax.set_title(f'Trajectory of Particle {particle_num + 1} over Time')
-    ax.legend()
-    fig.savefig(f"{directory}/Trajectory of {particle_num + 1} (model) from t={time_start} to t={time_final}")
+    fig.savefig(f"{directory}/Trajectory of {particle_num + 1} from t={time_start} to t={time_final}")
 
 def test_main(args):
     t_from = args.t_from
@@ -239,6 +229,8 @@ def test_main(args):
     print("Difference is:")
     print(trajectory_model_np-trajectory_real_np)
 
+    print()
+
     ## plot rdf graphs
 
     rdf_graph_one_snapshot(t_rdf_one_snapshot, trajectory_real_np, trajectory_model_np, directory, epoch)
@@ -260,18 +252,16 @@ def test_main(args):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--t_from', default = 400, type=int)
-    parser.add_argument('--t_how_many', default = 100, type=int)
+    parser.add_argument('--t_how_many', default = 300, type=int)
     parser.add_argument('--t_rdf_one_snapshot', default=75, type=int)
-    parser.add_argument('--t_rdf_multiple_snapshots_start', default=50, type=int)  
-    parser.add_argument('--t_rdf_multiple_snapshots_end', default=100, type=int)   
-    parser.add_argument('--cp_name', default='ENTIRE_NETWORK_latentODE_extrap')
+    parser.add_argument('--t_rdf_multiple_snapshots_start', default=0, type=int)  
+    parser.add_argument('--t_rdf_multiple_snapshots_end', default=299, type=int)   
+    parser.add_argument('--cp_name', default='ENTIRE_NETWORK_emb+cord')
     parser.add_argument('--epoch', default=100, type=int)
-    parser.add_argument('--architecture', default='latentode', type=str)
+    parser.add_argument('--architecture', default='node', type=str)
     args = parser.parse_args()
     test_main(args)
 
 
 if __name__ == '__main__':
     main()
-
-

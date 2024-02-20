@@ -1,3 +1,7 @@
+###########################
+# A large part of this code was taken from GAMD (https://arxiv.org/abs/2112.03383, Li, Zijie and Meidani, Kazem and Yadav, Prakarsh and Barati Farimani, Amir, 2022.)
+###########################
+
 import argparse
 import os, sys
 import joblib
@@ -27,6 +31,7 @@ from graph_utils import NeighborSearcher, graph_network_nbr_fn
 import time
 from NN_modules import *
 from train_utils_seq import *
+import pint
 
 
 # os.environ["CUDA_VISIBLE_DEVICES"] = "" # just to test if it works w/o gpu
@@ -72,10 +77,10 @@ def build_model(args, ckpt=None):
     return model
 
 
-class ParticleNetLightning(pl.LightningModule):
-    def __init__(self, args, mode = 'train', architecture = 'latentode', num_device=1, epoch_num=100, batch_size=1, learning_rate=3e-4, log_freq=1000,
+class MDSimNet(pl.LightningModule):
+    def __init__(self, args, num_device=1, epoch_num=100, batch_size=1, learning_rate=3e-4, log_freq=1000,
                  model_weights_ckpt=None, scaler_ckpt=None):
-        super(ParticleNetLightning, self).__init__()
+        super(MDSimNet, self).__init__()
         self.pnet_model = build_model(args, model_weights_ckpt)
         self.epoch_num = epoch_num
         self.learning_rate = learning_rate
@@ -85,8 +90,8 @@ class ParticleNetLightning(pl.LightningModule):
         self.train_data_scaler = StandardScaler()
         self.training_mean = np.array([0.])
         self.training_var = np.array([1.])
-        self.mode = mode
-        self.architecture = architecture
+        self.mode = args.mode
+        self.architecture = args.architecture
 
         if scaler_ckpt is not None:
             self.load_training_stats(scaler_ckpt)
@@ -110,9 +115,6 @@ class ParticleNetLightning(pl.LightningModule):
 
     
     def run_the_network(self, start_pos: np.ndarray, start_vel: np.ndarray, t, verbose=False):
-
-        print("Modeeeeeeeeee is:")
-        print(self.architecture)
         
         if self.architecture == 'node' or self.architecture == 'recurrent':
             edge_idx_lst = []
@@ -137,7 +139,7 @@ class ParticleNetLightning(pl.LightningModule):
                                         integration_time,
                                         )
 
-                pos_res = pos_res.detach().cpu().numpy()
+                pos_res = np.squeeze(pos_res.detach().cpu().numpy())
 
             if self.architecture == 'recurrent':
                 pos_res = [start_pos.detach().cpu().numpy()]
@@ -152,7 +154,6 @@ class ParticleNetLightning(pl.LightningModule):
                     pos_res.append(pos_new.squeeze(0).detach().cpu().numpy())
                 
                 pos_res = np.stack(pos_res)
-                print(pos_res.shape)
 
             if self.architecture == 'latentode':
 
@@ -191,19 +192,35 @@ class ParticleNetLightning(pl.LightningModule):
         graph_now = dgl.graph((neigh_idx, center_idx))
 
         return graph_now
-    """
-    def decode_the_sequence(self, sequence_embeddings: torch.Tensor, t):
-        trajectory = []
-        
-        for i in range(t):
-            #graph_emb, pos_next, forces = self.pnet_model.gdecoder_MLP(sequence_embeddings[i])
-            graph_emb, pos_next, vel = self.pnet_model.gdecoder_MLP(sequence_embeddings[i])
-            
-            pos_next = pos_next.detach().cpu().numpy()
-            trajectory.append(pos_next)
 
-        return trajectory
-    """
+    def get_temperature(self, two_pos): ## assuming all particles have the same mass, and the timestep between each step is the same, but it can be adjucted for different timesteps
+
+        coeff = 15500.21605 ## for 2fs difference in particle positions
+        displacement = two_pos[0] - two_pos[1]
+        squared = displacement.pow(2).sum(dim=1)
+        total_squared = squared.sum()
+        temperature = total_squared*coeff
+        return temperature ## this isn't exactly the temperature, but temperature times a constant coeff
+
+    def get_temp_pairs(self, pos):
+        lst =[]
+        for i in range(pos.size()[0]-1):
+            lst.append(self.get_temperature((pos[i], pos[i+1])))
+        return torch.stack(lst)
+
+    def custom_loss(self, y_true, y_pred, sigma=1.0):
+        mse_loss = torch.mean((y_true - y_pred) ** 2)
+        
+        # Assuming a fixed standard deviation sigma for the normal distribution
+        normal_loss = torch.mean((y_true - y_pred) ** 2) / (2 * sigma**2)
+        # No need to add the constant term of the log-likelihood since it doesn't affect optimization
+        
+        # Mask for values within the range 97 to 103
+        in_range = (y_pred >= 97) & (y_pred <= 103)
+        
+        # Apply normal loss within the range and MSE loss outside the range
+        loss = torch.where(in_range, normal_loss, mse_loss)
+        return torch.mean(loss)
 
     def get_edge_idx(self, nbrs, pos_jax, mask):
         dummy_center_idx = nbrs.idx.copy()
@@ -307,15 +324,23 @@ class ParticleNetLightning(pl.LightningModule):
 
         #regularization_loss = (torch.mean(graphem1)).abs()
 
+        temp = self.get_temp_pairs(pos_res)
+        temp_true = torch.full_like(temp, fill_value=float(100))
+
+        #temp_loss = nn.MSELoss()(temp, temp_true)
+        temp_loss = self.custom_loss(temp, torch.full_like(temp, fill_value=float(100)))
+
         #loss = cord_loss + rec_loss + 0.5/regularization_loss
 
         #conservative_loss = (torch.mean(pred)).abs() #conservative loss penalizes size of the predictions (remove it, leave it?)
         #loss = cord_loss #+ 0.1*vel_loss #+ LAMBDA2 * conservative_loss
-        loss = emb_loss + 0.01*cord_loss
+        loss = 0.1*emb_loss + 0.1*cord_loss + temp_loss
 
         self.log('cord_loss', cord_loss, on_step=True, prog_bar=True, logger=True)
         self.log('vel_loss', vel_loss, on_step=True, prog_bar=True, logger=True)
         self.log('emb_loss', emb_loss, on_step=True, prog_bar=True, logger=True)
+        self.log('temp_loss', temp_loss, on_step=True, prog_bar=True, logger=True)
+        self.log('temp', torch.mean(temp), on_step=True, prog_bar=True, logger=True)
         #self.log('force_loss', force_loss, on_step=True, prog_bar=True, logger=True)
         #self.log('graph rec loss', rec_loss, on_step=True, prog_bar=True, logger=True)
         self.log(f'actual loss:{self.loss_fn}', loss, on_step=True, prog_bar=True, logger=True)
@@ -325,13 +350,13 @@ class ParticleNetLightning(pl.LightningModule):
 
     def configure_optimizers(self):
         optim = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
-        sched = StepLR(optim, step_size=10, gamma=0.001**(10/self.epoch_num)) ## changed 5 to 2
+        sched = StepLR(optim, step_size=30, gamma=0.001**(10/self.epoch_num)) ## changed 5 to 2
         return [optim], [sched]
 
     def train_dataloader(self):
 
-        dataset = sequence_of_pos(dataset_path=os.path.join(self.data_dir, 'lj_data'),
-                               sample_num=999, #this I changed
+        dataset = sequence_of_pos(dataset_path=os.path.join(self.data_dir, 'lj_data_1ts'),
+                               sample_num=1999, #this I changed
                                seed_num=10,
                                mode='train')
 
@@ -340,8 +365,8 @@ class ParticleNetLightning(pl.LightningModule):
 
     def val_dataloader(self):
 
-        dataset = sequence_of_pos(dataset_path=os.path.join(self.data_dir, 'lj_data'),
-                               sample_num=999, #this I changed
+        dataset = sequence_of_pos(dataset_path=os.path.join(self.data_dir, 'lj_data_1ts'),
+                               sample_num=1999, #this I changed
                                seed_num=10,
                                mode='test')
 
@@ -449,7 +474,7 @@ class ModelCheckpointAtEpochEnd(pl.Callback):
         self.save_step_frequency = save_step_frequency
         self.prefix = prefix
 
-    def on_epoch_end(self, trainer: pl.Trainer, pl_module: ParticleNetLightning):
+    def on_epoch_end(self, trainer: pl.Trainer, pl_module: MDSimNet):
         """ Check if we should save a checkpoint after every train batch """
         epoch = trainer.current_epoch
         if epoch % self.save_step_frequency == 0 or epoch == pl_module.epoch_num -1:
@@ -477,7 +502,7 @@ def train_model(args):
     architecture = args.architecture
     wandb_logger = WandbLogger()
 
-    model = ParticleNetLightning(epoch_num=max_epoch,
+    model = MDSimNet(epoch_num=max_epoch,
                                  num_device=num_gpu if num_gpu != -1 else 1,
                                  learning_rate=lr,
                                  model_weights_ckpt=weight_ckpt,
@@ -501,7 +526,7 @@ def train_model(args):
                       benchmark=True,
                       distributed_backend='ddp',
                       logger=wandb_logger,
-                      #resume_from_checkpoint='/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/ENTIRE_NETWORK/checkpoint_4640.ckpt',
+                      resume_from_checkpoint='/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/ENTIRE_NETWORK_latentODE_extrap_1ts-100t/checkpoint_2620.ckpt',
                       )
     trainer.fit(model)
 
@@ -510,8 +535,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--min_epoch', default = 5000, type=int)
     parser.add_argument('--max_epoch', default = 5000, type=int)
-    parser.add_argument('--lr', default=1e-4, type=float)
-    parser.add_argument('--cp_dir', default='./model_ckpt/ENTIRE_NETWORK_latentODE_interp')
+    parser.add_argument('--lr', default=1e-3, type=float)
+    parser.add_argument('--cp_dir', default='./model_ckpt/ENTIRE_NETWORK_latentODE_extrap_1ts-100t(temp_posttraining)')
     parser.add_argument('--state_ckpt_dir', default=None, type=str)
     parser.add_argument('--batch_size', default=1, type=int)
     parser.add_argument('--encoding_size', default=32, type=int)

@@ -297,7 +297,7 @@ class sequence_of_pos(Dataset):
     
 
     def get_sequence(self, index):
-        idxs = np.arange(0, 200)
+        idxs = np.arange(0, 100)
 
         pos_lst = []
         vel_lst = []
@@ -316,7 +316,7 @@ class sequence_of_pos(Dataset):
 
     def get_one(self, idx, seed, get_path_name=False):
         
-        fname = f'data_{seed}_{idx+400}'#f'seed_{seed_to_read}_data_{sample_to_read}'
+        fname = f'data_{seed}_{idx+1000}'#f'seed_{seed_to_read}_data_{sample_to_read}'
         #fname = f'data_5_{idx+400}'#f'seed_{seed_to_read}_data_{sample_to_read}'
         #fname_next = f'data_{seed+200}_{sample_to_read_next}'
 
