@@ -53,9 +53,9 @@ import wandb
 
 import torch.utils.data as data
 
-from GRAPH_LATENT_ODE.CG_ODE.lib.create_coupled_ode_model import *
+from GRAPH_LATENT_ODE.lib.create_coupled_ode_model import *
 from torch.distributions.normal import Normal
-import GRAPH_LATENT_ODE.CG_ODE.lib.utils as utils
+import GRAPH_LATENT_ODE.lib.utils as utils
 from torch_geometric.data import Data, Batch
 import math
 from scipy.linalg import block_diag
