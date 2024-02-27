@@ -261,7 +261,6 @@ class just_a_sequence(Dataset):
 class sequence_of_pos(Dataset):
     def __init__(self,
             dataset_path,
-            sample_num,   # per seed
             device='cuda',
             split=(0.9, 0.1),
             seed_num=10,
@@ -270,19 +269,19 @@ class sequence_of_pos(Dataset):
         self.device = device
         self.seed_num = seed_num
         self.dataset_path = dataset_path
-        self.sample_num = sample_num
         self.case_prefix = 'data_'
-        self.seed_num = seed_num
+        self.length = 20
+        self.how_many = 10
 
         self.mode = mode
         assert mode in ['train', 'test']
         #np.random.seed(0)   # fix same random seed: Setting a random seed ensures that the random shuffling of idxs will be the same every time you run your code, making your results reproducible.
-        seed_seq = [i for i in range(seed_num)]
+        seed_seq = [i for i in range(seed_num*self.how_many)]
         ratio = split[0]
         if mode == 'train':
-            self.index = seed_seq[:int(seed_num*ratio)]
+            self.index = seed_seq[:int(seed_num*ratio*self.how_many)]
         else:
-            self.index = seed_seq[int(seed_num*ratio):]
+            self.index = seed_seq[int(seed_num*ratio*self.how_many):]
 
     def __getitem__(self, index):
 
@@ -294,20 +293,21 @@ class sequence_of_pos(Dataset):
 
     def __len__(self):
         return len(self.index)
-    
 
     def get_sequence(self, index):
-        idxs = np.arange(0, 100)
+        seed = int(index//self.how_many)
+        start = index%self.how_many*self.length
+        idxs = np.arange(start, self.length+start)
 
         pos_lst = []
         vel_lst = []
 
         for i in idxs:
 
-            current_pos = self.get_one(i, index)['pos']
+            current_pos = self.get_one(i, seed)['pos']
             pos_lst.append(current_pos)
 
-            current_vel = self.get_one(i, index)['vel']
+            current_vel = self.get_one(i, seed)['vel']
             vel_lst.append(current_vel)
 
         dictionary = {'pos': pos_lst, 'vel': vel_lst}

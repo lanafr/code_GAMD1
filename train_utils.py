@@ -39,6 +39,7 @@ class LJDataNew(Dataset):
         sample_to_read = idx % self.sample_num
         seed = idx // self.sample_num
         fname = f'data_{seed}_{sample_to_read}'#f'seed_{seed_to_read}_data_{sample_to_read}'
+        #fname = f'data_3_678'#f'seed_{seed_to_read}_data_{sample_to_read}'
         data_path = os.path.join(self.dataset_path, fname)
 
         data = {}

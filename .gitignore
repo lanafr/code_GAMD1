@@ -13,3 +13,5 @@
 /LJ/graphs_to_train_embedding256
 /LJ/lightning_logs
 /LJ/output
+/LJ/results_autoencoder
+/LJ/results_all

@@ -176,6 +176,18 @@ def plot_of_trajectory(particle_num, time_start, time_final, trajectory_real_np,
     ax.legend()
     fig.savefig(f"{directory}/Trajectory of {particle_num + 1} from t={time_start} to t={time_final}")
 
+def save_xyz_from_numpy(coordinates, output_file):
+    num_frames = coordinates.shape[0]
+    num_atoms = coordinates.shape[1]
+
+    with open(output_file, 'w') as f:
+        for frame_idx in range(num_frames):
+            f.write(str(num_atoms) + '\n')
+            f.write("\n")
+            for atom_idx in range(num_atoms):
+                atom = coordinates[frame_idx, atom_idx]
+                f.write(f"Ar {atom[0]} {atom[1]} {atom[2]}\n")
+
 def test_main(args):
     t_from = args.t_from
     t_how_many = args.t_how_many
@@ -193,21 +205,21 @@ def test_main(args):
     start_vel = []
 
     if architecture == 'node' or architecture == 'recurrent':
-        start_all = np.load(f'md_dataset/lj_data_to_test/data_0_{t_from}.npz')
+        start_all = np.load(f'md_dataset/lj_data_20ts/data_0_{t_from}.npz')
         start_pos = start_all['pos']
         start_vel = start_all['vel']
 
-    if architecture == 'latentode':
+    if architecture == 'latentode' or architecture == 'graphlatentode':
         for i in range (t_from,t_from+int(t_how_many/2)):
-            start_all = np.load(f'md_dataset/lj_data_to_test/data_0_{i}.npz')
+            start_all = np.load(f'md_dataset/lj_data_20ts/data_0_{i}.npz')
             start_pos.append(start_all['pos'])
             start_vel.append(start_all['vel'])
 
     trajectory_real = []
     trajectory_model = []
 
-    for i in range(t_from,t_from+t_how_many):
-        everything = np.load(f'md_dataset/lj_data_to_test/data_0_{i}.npz')
+    for i in range(t_from,t_from+int(t_how_many/2)): ## changed for graph latent odes
+        everything = np.load(f'md_dataset/lj_data_20ts/data_0_{i}.npz')
         just_pos = everything['pos']
         trajectory_real.append(just_pos)
 
@@ -232,9 +244,9 @@ def test_main(args):
     print()
 
     ## plot rdf graphs
-
+    rdf_graph_one_snapshot(0, trajectory_real_np, trajectory_model_np, directory, epoch)
     rdf_graph_one_snapshot(t_rdf_one_snapshot, trajectory_real_np, trajectory_model_np, directory, epoch)
-    rdf_graph_multiple_snapshots(t_rdf_multiple_snapshots_start, t_rdf_multiple_snapshots_end, trajectory_real_np, trajectory_model_np, directory, epoch)
+    rdf_graph_multiple_snapshots(t_rdf_multiple_snapshots_start, int(t_rdf_multiple_snapshots_end/2), trajectory_real_np, trajectory_model_np, directory, epoch)
 
     ## plot particle trajectories
     
@@ -245,17 +257,18 @@ def test_main(args):
     plot_of_trajectory(199, t_rdf_multiple_snapshots_start, t_rdf_multiple_snapshots_end, trajectory_real_np, trajectory_model_np, directory)
 
     ## save trajectory data
-    file_path = os.path.join(directory, f'trajectory_data_t=0-{t_how_many}')
-    np.save(file_path, trajectory_model_np)
+    file_path = os.path.join(directory, f'trajectory_data_t=0-{t_how_many}.xyz')
+    #np.save(file_path, trajectory_model_np)
+    save_xyz_from_numpy(trajectory_model_np, file_path)
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--t_from', default = 400, type=int)
-    parser.add_argument('--t_how_many', default = 300, type=int)
-    parser.add_argument('--t_rdf_one_snapshot', default=75, type=int)
+    parser.add_argument('--t_from', default = 1100, type=int)
+    parser.add_argument('--t_how_many', default = 20, type=int)
+    parser.add_argument('--t_rdf_one_snapshot', default=9, type=int)
     parser.add_argument('--t_rdf_multiple_snapshots_start', default=0, type=int)  
-    parser.add_argument('--t_rdf_multiple_snapshots_end', default=299, type=int)   
+    parser.add_argument('--t_rdf_multiple_snapshots_end', default=19, type=int)   
     parser.add_argument('--cp_name', default='ENTIRE_NETWORK_emb+cord')
     parser.add_argument('--epoch', default=100, type=int)
     parser.add_argument('--architecture', default='node', type=str)

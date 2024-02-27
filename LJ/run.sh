@@ -6,7 +6,7 @@
 #SBATCH --time=0-24:00:00  # Limit on the total run time (format: days-hours:minutes:seconds)
 #SBATCH --gres=gpu:1  # Number of GPUs if needed
 #SBATCH --cpus-per-task=8  # Number of CPUs (Don't use more than 24 per GPU)
-#SBATCH --mem=50G  # Memory in GB (Don't use more than 126G per GPU)
+#SBATCH --mem=20G  # Memory in GB (Don't use more than 126G per GPU)
 
 # load python module
 
@@ -61,8 +61,11 @@ export PATH="/home/guests/lana_frkin/.local/bin:$PATH"
 #python seqn_2_decoderincluded.py
 #python entire_network_test.py
 #python entire_network.py
-python train_AUTOENCODER.py
-#python train_ENTIRE_NETWORK.py --mode train --architecture latentode
+#python train_AUTOENCODER.py
+#python train_ENTIRE_NETWORK.py --mode train --architecture graphlatentode
 #python RNN_sequential_network.py
 #python entire_network_RNN.py
-#python TEST_entire_network.py --epoch 60 #--cp_name ENTIRE_NETWORK_latentODE_extrap_1ts-100t --epoch 2620
+python TEST_entire_network.py --cp_name EVERYTHING_20s_just_node --epoch 30 --architecture graphlatentode
+#nvidia-smi
+#python TEST_autoencoder.py --epoch 39 --cp_name 'AUTOENCODER_50ts(cords)_NNConv_512'
+#python change_me_pls.py

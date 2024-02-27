@@ -348,14 +348,15 @@ class Encoder(nn.Module):  # no bond, no learnable node encoder
         self.box_size = self.box_size
         half_ec = int(encoding_size/2)
 
-        self.node_encoder = MLP(3, encoding_size, hidden_layer=2, hidden_dim=128, activation='leaky_relu')
-        #self.vel_encoder = MLP(3, half_ec, hidden_layer=2, hidden_dim=128, activation='leaky_relu')
+        self.node_encoder = MLP(3, half_ec, hidden_layer=2, hidden_dim=128, activation='leaky_relu')
+        self.vel_encoder = MLP(3, half_ec, hidden_layer=2, hidden_dim=128, activation='leaky_relu')
         #self.node_dencoder = MLP(64, 3, hidden_layer=2, hidden_dim=hidden_dim, activation='leaky_relu')
         self.edge_encoder = MLP(3 + 1 + len(self.edge_expand.centers), self.edge_emb_dim, hidden_dim=hidden_dim,
                                 activation='leaky_relu')
         self.edge_layer_norm = nn.LayerNorm(self.edge_emb_dim)
         #self.graph_decoder = MLP(encoding_size, out_feats, hidden_layer=2, hidden_dim=hidden_dim, activation='gelu')
         self.save_index = 0
+        self.MLPbig_to_small = MLP(encoding_size*258, out_feats, hidden_layer=2, hidden_dim=128, activation='leaky_relu')
 
 
         # with TAGConv
@@ -434,12 +435,12 @@ class Encoder(nn.Module):  # no bond, no learnable node encoder
         #add node embeddings
         #fluid_graph.ndata['e'] = fluid_pos
         positions_encoded = self.node_encoder(fluid_pos)
-        #velocities_encoded = self.vel_encoder(fluid_vel)
+        velocities_encoded = self.vel_encoder(fluid_vel)
         
-        #new_node = torch.cat((positions_encoded, velocities_encoded), axis=1)
-        #fluid_graph.ndata['e'] = new_node
+        new_node = torch.cat((positions_encoded, velocities_encoded), axis=1)
+        fluid_graph.ndata['e'] = new_node
         #fluid_graph.ndata['e'] = positions_encoded + velocities_encoded
-        fluid_graph.ndata['e'] = positions_encoded
+        #fluid_graph.ndata['e'] = positions_encoded
 
         #graph_to_save = dgl.graph((neigh_idx, center_idx))
         #graph_to_save.ndata['e'] = self.node_encoder(fluid_pos)
@@ -480,6 +481,11 @@ class Encoder(nn.Module):  # no bond, no learnable node encoder
     def gencoder_mine(self, h: torch.Tensor, g: dgl.DGLGraph):
         out = self.graph_conv(h, g)
         out = self.norm(out)
+        d1, d3 = out.size()
+        d2 = 258
+        d1 = int(d1/d2)
+        out = out.view(d1, d2*d3)
+        out = self.MLPbig_to_small(out)
         return out
 
     def forward(self,
@@ -695,7 +701,6 @@ class latentODE(nn.Module):
 
         return output
 
-
 class EntireModel(nn.Module):
     def __init__(self,
                 encoding_size,
@@ -711,16 +716,19 @@ class EntireModel(nn.Module):
                 use_layer_norm=False):
         super(EntireModel, self).__init__()
 
-        PATH1 = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/AUTOENCODER/encoder_checkpoint_29.ckpt'
-        PATH2 = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/AUTOENCODER/decoder_checkpoint_29.ckpt'
+        hidden_latentode_size = 128
+
+        PATH1 = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/AUTOENCODER_50ts(forces+cords)/encoder_checkpoint_39.ckpt'
+        PATH2 = '/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/AUTOENCODER_50ts(forces+cords)/decoder_checkpoint_39.ckpt'
 
         self.encoding_size = encoding_size
 
         self.encoder = Encoder(encoding_size,
-                    out_feats,
+                    hidden_latentode_size,
+                    #out_feats,
                     box_size,   # can also be array
                     hidden_dim=128,
-                    conv_layer=2,
+                    conv_layer=4,
                     edge_embedding_dim=32,
                     dropout=0.1,
                     drop_edge=True,
@@ -731,18 +739,18 @@ class EntireModel(nn.Module):
         self.architecture = architecture
         
         if architecture == 'node':
-            self.neuralODE = ODEBlock(f1(encoding_size))
+            self.neuralODE = ODEBlock(f1(hidden_latentode_size))
 
         if architecture == 'latentode':
-            self.latentODE = latentODE(encoding_size, mode)
+            self.latentODE = latentODE(hidden_latentode_size, mode)
 
         if architecture == 'recurrent':
-            self.recurrent = RNN(input_size = encoding_size, hidden_size = 256, num_layers=8)
+            self.recurrent = RNN(input_size = hidden_latentode_size, hidden_size = 256, num_layers=8)
             #self.recurrent = LSTM(input_size = encoding_size, hidden_size = 256, num_layers=8, proj_size = encoding_size)
 
         self.decoder = Decoder(
-                    encoding_size,
-                    out_feats,
+                    hidden_latentode_size,
+                    out_feats*258,
                     box_size,   # can also be array
                     hidden_dim=128,
                     use_layer_norm=False).load_from_checkpoint(PATH2)
@@ -769,6 +777,11 @@ class EntireModel(nn.Module):
 
         h, pos_result, vel_result, forces = self.decoder(to_decode)
 
+        d1, d2 = pos_result.size()
+
+        pos_result = pos_result.view(d1, 258, 3)
+        vel_result = vel_result.view(d1, 258, 3)
+
         return pos_result, vel_result, h
 
 class Autoencoder(nn.Module):
@@ -784,8 +797,10 @@ class Autoencoder(nn.Module):
                 use_layer_norm=False,):
         super(Autoencoder, self).__init__()
 
+        hidden_latentode_size = 512
+
         self.encoder = Encoder(encoding_size,
-                    out_feats,
+                    hidden_latentode_size,
                     box_size,   # can also be array
                     hidden_dim=128,
                     conv_layer=4,
@@ -795,8 +810,8 @@ class Autoencoder(nn.Module):
                     use_layer_norm=False)
 
         self.decoder = Decoder(
-                    encoding_size,
-                    out_feats,
+                    hidden_latentode_size,
+                    out_feats*258,
                     box_size,   # can also be array
                     hidden_dim=128,
                     use_layer_norm=False)
@@ -810,6 +825,11 @@ class Autoencoder(nn.Module):
         embed = self.encoder(fluid_pos_lst, fluid_edge_lst, fluid_vel_lst)
 
         h, pos_result, vel_result, forces_result = self.decoder(embed)
+
+        d1, d2 = pos_result.size()
+
+        pos_result = pos_result.view(d1, 258, 3)
+        vel_result = vel_result.view(d1, 258, 3)
 
         return pos_result, vel_result, forces_result
 

@@ -29,9 +29,11 @@ from nn_module import SimpleMDNetNew
 from train_utils import LJDataNew
 from graph_utils import NeighborSearcher, graph_network_nbr_fn
 import time
-from NN_modules import *
+from AGAIN_NEW_MODULESS import * ##change thiss
 from train_utils_seq import *
 import pint
+
+network_has_been_trained = False
 
 
 # os.environ["CUDA_VISIBLE_DEVICES"] = "" # just to test if it works w/o gpu
@@ -87,9 +89,12 @@ class MDSimNet(pl.LightningModule):
         self.batch_size = batch_size
         self.num_device = num_device
         self.log_freq = log_freq
-        self.train_data_scaler = StandardScaler()
-        self.training_mean = np.array([0.])
-        self.training_var = np.array([1.])
+        self.train_data_scaler_pos = StandardScaler()
+        self.train_data_scaler_vel = StandardScaler()
+        self.training_mean_vel = np.array([0.])
+        self.training_var_vel = np.array([1.])
+        self.training_mean_pos = np.array([0.])
+        self.training_var_pos = np.array([1.])
         self.mode = args.mode
         self.architecture = args.architecture
 
@@ -110,8 +115,10 @@ class MDSimNet(pl.LightningModule):
     def load_training_stats(self, scaler_ckpt):
         if scaler_ckpt is not None:
             scaler_info = np.load(scaler_ckpt)
-            self.training_mean = scaler_info['mean']
-            self.training_var = scaler_info['var']
+            self.training_mean_vel = scaler_info['mean_vel']
+            self.training_var_vel = scaler_info['var_vel']
+            self.training_mean_pos = scaler_info['mean_pos']
+            self.training_var_pos = scaler_info['var_pos']
 
     
     def run_the_network(self, start_pos: np.ndarray, start_vel: np.ndarray, t, verbose=False):
@@ -128,18 +135,31 @@ class MDSimNet(pl.LightningModule):
             integration_time = torch.arange(t).to('cuda')
             integration_time = integration_time.float()
 
-            start_vel = torch.from_numpy(start_vel).float().cuda()            
+            start_vel = torch.from_numpy(start_vel).float().cuda()
+            start_vel = self.scale(start_vel, self.train_data_scaler_vel).to('cuda')         
             start_pos = torch.from_numpy(start_pos).float().cuda()
+            start_pos = self.scale(start_pos, self.train_data_scaler_pos).to('cuda')  
 
         with torch.no_grad():
-            if self.architecture == 'node':
+            if self.architecture == 'gnode':
+                pos_res, vel_res, emb_res = self.pnet_model([start_pos],
+                                    [start_vel],
+                                    integration_time,
+                                    )
+                pos_res = np.squeeze(denormalize_pos(pos_res).detach().cpu().numpy())
+                vel_res = np.squeeze(denormalize_vel(vel_res).detach().cpu().numpy())
+
+            if self.architecture == 'node' or self.architecture == 'gnode':
                 pos_res, vel_res, emb_res = self.pnet_model([start_pos],
                                         edge_idx_lst,
                                         [start_vel],
                                         integration_time,
                                         )
 
-                pos_res = np.squeeze(pos_res.detach().cpu().numpy())
+                pos_res = np.squeeze(denormalize_pos(pos_res).detach().cpu().numpy())
+                vel_res = np.squeeze(denormalize_vel(vel_res).detach().cpu().numpy())
+
+            ## TO DO: fix normalization for recurrent
 
             if self.architecture == 'recurrent':
                 pos_res = [start_pos.detach().cpu().numpy()]
@@ -154,14 +174,19 @@ class MDSimNet(pl.LightningModule):
                     pos_res.append(pos_new.squeeze(0).detach().cpu().numpy())
                 
                 pos_res = np.stack(pos_res)
+                vel_res = np.squeeze(denormalize_acc(vel_res).detach().cpu().numpy())
 
-            if self.architecture == 'latentode':
+
+            if self.architecture == 'latentode' or self.architecture == 'graphlatentode':
 
                 integration_time = torch.arange(int(t/2)).to('cuda')
                 integration_time = integration_time.float()
 
                 pos_lst = [torch.from_numpy(arr).to('cuda').to(torch.float32) for arr in start_pos]
                 vel_lst = [torch.from_numpy(arr).to('cuda').to(torch.float32) for arr in start_vel]
+                vel_lst = self.scale(vel_lst, self.train_data_scaler_vel).to('cuda')
+                pos_lst = self.scale(pos_lst, self.train_data_scaler_pos).to('cuda')
+
 
                 fluid_edge_lst = []
                 for i in range (len(pos_lst)):
@@ -171,13 +196,22 @@ class MDSimNet(pl.LightningModule):
                                                             self.nbrlst_to_edge_mask,
                                                             'all')
                     fluid_edge_lst += [fluid_edge_tsr]
+                if self. architecture == 'latentode':
+                    pos_res, vel_res, emb_res = self.pnet_model(pos_lst,
+                                                fluid_edge_lst,
+                                                vel_lst,
+                                                integration_time,
+                                                )
+                if self.architecture == 'graphlatentode':
+                    integration_time = pos_lst.size()[0]
+                    node_res, edge_res = self.pnet_model(pos_lst,
+                                        fluid_edge_lst,
+                                        vel_lst,
+                                        integration_time,
+                                        )
 
-                pos_res, vel_res, emb_res = self.pnet_model(pos_lst,
-                                            fluid_edge_lst,
-                                            vel_lst,
-                                            integration_time,
-                                            )
-                pos_res = pos_res.detach().cpu().numpy()
+                    pos_res = np.squeeze(self.denormalize_pos(node_res.permute(1, 0, 2).detach().cpu().numpy()))
+                    #vel_res = np.squeeze(denormalize_vel(vel_res).detach().cpu().numpy())
 
         return pos_res
 
@@ -222,6 +256,31 @@ class MDSimNet(pl.LightningModule):
         loss = torch.where(in_range, normal_loss, mse_loss)
         return torch.mean(loss)
 
+    def scale(self, inp, scaler):
+        scaled_sequence = []
+        for seq in inp:
+            seq = seq.squeeze()
+            if seq.ndim == 1:
+                seq = seq.reshape((-1, 1))  # Reshape 1D array to 2D
+            b_pnum, dims = seq.shape
+            seq = seq.detach().cpu()  # Move tensor to CPU
+            scaler.partial_fit(seq.numpy())  # Convert to NumPy array
+            scaled_seq = scaler.transform(seq.numpy())
+            scaled_seq_tensor = torch.from_numpy(scaled_seq).float().view(b_pnum, dims)
+            scaled_sequence.append(scaled_seq_tensor)
+        return torch.stack(scaled_sequence)
+
+    def denormalize_vel(self, vel):
+        return self.denormalize(vel, self.training_var_vel, self.training_mean_vel)
+    
+    def denormalize_pos(self, pos):
+        return self.denormalize(pos, self.training_var_pos, self.training_mean_pos)
+
+    def denormalize(self, normalized, var, mean):
+        return normalized * \
+                np.sqrt(var) +\
+                mean
+
     def get_edge_idx(self, nbrs, pos_jax, mask):
         dummy_center_idx = nbrs.idx.copy()
         #dummy_center_idx = jax.ops.index_update(dummy_center_idx, None,
@@ -260,11 +319,27 @@ class MDSimNet(pl.LightningModule):
 
     def training_step(self, batch, batch_nb):
 
-        pos_lst = torch.stack(batch[0]['pos']).to('cuda').squeeze(dim=1)
-        vel_lst = torch.stack(batch[0]['vel']).to('cuda').squeeze(dim=1)
+        torch.cuda.empty_cache()
+
+        pos_lst = self.scale(batch[0]['pos'], self.train_data_scaler_pos).to('cuda')
+        vel_lst = self.scale(batch[0]['vel'], self.train_data_scaler_vel).to('cuda')
+
+        print(pos_lst.size())
 
         integration_time = torch.arange(pos_lst.size()[0]).to('cuda')
         integration_time = integration_time.float()
+
+        if self.architecture == 'gnode':
+            start_pos = pos_lst[0]
+            start_vel = vel_lst[0]
+            
+            BOX_SIZE = torch.tensor([27.27, 27.27, 27.27]).to('cuda')
+            start_pos = torch.fmod(start_pos, BOX_SIZE) #this I added
+
+            pos_res, vel_res, emb_res = self.pnet_model([start_pos],
+                                    [start_vel],
+                                    integration_time,
+                                    )
 
         if self.architecture == 'node':
             start_pos = pos_lst[0]
@@ -288,7 +363,7 @@ class MDSimNet(pl.LightningModule):
                                     integration_time,
                                     )
 
-        if self.architecture == 'recurrent' or self.architecture == 'latentode':
+        if self.architecture == 'recurrent' or self.architecture == 'latentode' or self.architecture == 'graphlatentode':
 
             ### calculate the "true" emebeddings
             fluid_edge_lst = []
@@ -298,65 +373,89 @@ class MDSimNet(pl.LightningModule):
                                                         self.nbr_searcher,
                                                         self.nbrlst_to_edge_mask,
                                                         'all')
-                fluid_edge_lst += [fluid_edge_tsr]
+                fluid_edge_lst += [torch.tensor(fluid_edge_tsr)]
+            
+        if self.architecture == 'graphlatentode':
+            
+            integration_time = pos_lst.size()[0]
+            node_res, edge_res = self.pnet_model(pos_lst[0:int(integration_time/2)],
+                                    fluid_edge_lst[0:int(integration_time/2)],
+                                    vel_lst[0:int(integration_time/2)],
+                                    int(integration_time/2),
+                                    )
+            c = 1
+            edge_gt = []
+            for i in range(int(integration_time/2),integration_time):
+                edge_gt.append(self.pnet_model.get_edge_weight_matrix(pos_lst[i], fluid_edge_lst[i], c))
 
-            pos_res, vel_res, emb_res = self.pnet_model(pos_lst,
+            edge_gt = torch.stack(edge_gt)
+
+            node_loss = nn.MSELoss()(pos_lst[int(integration_time/2):], node_res.permute(1, 0, 2))
+            edge_loss = nn.MSELoss()(edge_res, edge_gt.view_as(edge_res).cuda())
+            loss = node_loss# + edge_loss
+            self.log('cord_loss', node_loss, on_step=True, prog_bar=True, logger=True)
+            self.log('edge_loss', edge_loss, on_step=True, prog_bar=True, logger=True)
+            return loss
+
+        if self.architecture == 'recurrent' or self.architecture == 'latentode':  
+            pos_res, vel_res, force_res = self.pnet_model(pos_lst,
                                     fluid_edge_lst,
                                     vel_lst,
                                     integration_time,
                                     )
 
-        with torch.no_grad():
-            emb_lst = self.pnet_model.encoder(pos_lst, fluid_edge_lst, vel_lst).view_as(emb_res)
+        #with torch.no_grad():
+        #    emb_lst = self.pnet_model.encoder(pos_lst, fluid_edge_lst, vel_lst).view_as(emb_res)
 
         if self.loss_fn == 'mae':
             cord_loss = nn.L1Loss()(pos_lst, pos_res)
             #rec_loss = nn.L1Loss()(graphem1, graphem2)
             #force_loss = nn.L1Loss()(pred_forces, forces_gt)
             vel_loss = nn.L1Loss()(vel_lst, vel_res)
-            emb_loss = nn.L1Loss()(emb_lst, emb_res)
+            #emb_loss = nn.L1Loss()(emb_lst, emb_res)
         else:
             cord_loss = nn.MSELoss()(pos_lst, pos_res)
             #rec_loss = nn.MSELoss()(graphem1, graphem2)
             #force_loss = nn.MSELoss()(pred_forces, forces_gt)
             vel_loss = nn.MSELoss()(vel_lst, vel_res)
-            emb_loss = nn.L1Loss()(emb_lst, emb_res)
+            #emb_loss = nn.L1Loss()(emb_lst, emb_res)
 
         #regularization_loss = (torch.mean(graphem1)).abs()
 
+        self.training_mean_pos = self.train_data_scaler_pos.mean_
+        self.training_var_pos = self.train_data_scaler_pos.var_
+
+        self.training_mean_vel = self.train_data_scaler_vel.mean_
+        self.training_var_vel = self.train_data_scaler_vel.var_
         temp = self.get_temp_pairs(pos_res)
         temp_true = torch.full_like(temp, fill_value=float(100))
 
-        #temp_loss = nn.MSELoss()(temp, temp_true)
+        temp_loss = nn.MSELoss()(temp, temp_true)
         temp_loss = self.custom_loss(temp, torch.full_like(temp, fill_value=float(100)))
 
         #loss = cord_loss + rec_loss + 0.5/regularization_loss
 
         #conservative_loss = (torch.mean(pred)).abs() #conservative loss penalizes size of the predictions (remove it, leave it?)
         #loss = cord_loss #+ 0.1*vel_loss #+ LAMBDA2 * conservative_loss
-        loss = 0.1*emb_loss + 0.1*cord_loss + temp_loss
+        loss = cord_loss + vel_loss #+ temp_loss +0.1*emb_loss
 
         self.log('cord_loss', cord_loss, on_step=True, prog_bar=True, logger=True)
         self.log('vel_loss', vel_loss, on_step=True, prog_bar=True, logger=True)
-        self.log('emb_loss', emb_loss, on_step=True, prog_bar=True, logger=True)
+        #self.log('emb_loss', emb_loss, on_step=True, prog_bar=True, logger=True)
         self.log('temp_loss', temp_loss, on_step=True, prog_bar=True, logger=True)
         self.log('temp', torch.mean(temp), on_step=True, prog_bar=True, logger=True)
         #self.log('force_loss', force_loss, on_step=True, prog_bar=True, logger=True)
         #self.log('graph rec loss', rec_loss, on_step=True, prog_bar=True, logger=True)
         self.log(f'actual loss:{self.loss_fn}', loss, on_step=True, prog_bar=True, logger=True)
 
-
-        return loss
-
     def configure_optimizers(self):
-        optim = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
-        sched = StepLR(optim, step_size=30, gamma=0.001**(10/self.epoch_num)) ## changed 5 to 2
-        return [optim], [sched]
+            optim = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
+            sched = StepLR(optim, step_size=10, gamma=0.001**(10/self.epoch_num)) ## changed 5 to 2
+            return [optim], [sched]
 
     def train_dataloader(self):
 
-        dataset = sequence_of_pos(dataset_path=os.path.join(self.data_dir, 'lj_data_1ts'),
-                               sample_num=1999, #this I changed
+        dataset = sequence_of_pos(dataset_path=os.path.join(self.data_dir, 'lj_data_20ts'),
                                seed_num=10,
                                mode='train')
 
@@ -365,8 +464,7 @@ class MDSimNet(pl.LightningModule):
 
     def val_dataloader(self):
 
-        dataset = sequence_of_pos(dataset_path=os.path.join(self.data_dir, 'lj_data_1ts'),
-                               sample_num=1999, #this I changed
+        dataset = sequence_of_pos(dataset_path=os.path.join(self.data_dir, 'lj_data_20ts'),
                                seed_num=10,
                                mode='test')
 
@@ -375,16 +473,31 @@ class MDSimNet(pl.LightningModule):
 
     def validation_step(self, batch, batch_nb):
 
+        torch.cuda.empty_cache()
+
+        #if network_has_been_trained == True:
         with torch.no_grad():
 
-            pos_lst = torch.stack(batch[0]['pos']).to('cuda').squeeze(dim=1)
-            vel_lst = torch.stack(batch[0]['vel']).to('cuda').squeeze(dim=1)
+            pos_lst = self.scale(batch[0]['pos'], self.train_data_scaler_pos).to('cuda')
+            vel_lst = self.scale(batch[0]['vel'], self.train_data_scaler_vel).to('cuda')
 
             #gt_pos = torch.cat(pos_lst, dim=0)
             #gt_vel = torch.cat(vel_lst, dim=0)
 
             integration_time = torch.arange(pos_lst.size()[0]).to('cuda')
             integration_time = integration_time.float()
+
+            if self.architecture == 'gnode':
+                start_pos = pos_lst[0]
+                start_vel = vel_lst[0]
+                
+                BOX_SIZE = torch.tensor([27.27, 27.27, 27.27]).to('cuda')
+                start_pos = torch.fmod(start_pos, BOX_SIZE) #this I added
+
+                pos_res, vel_res, emb_res = self.pnet_model([start_pos],
+                                        [start_vel],
+                                        integration_time,
+                                        )
 
             if self.architecture == 'node':
 
@@ -409,7 +522,7 @@ class MDSimNet(pl.LightningModule):
                                         integration_time,
                                         )
             
-            if self.architecture == 'recurrent' or self.architecture == 'latentode':
+            if self.architecture == 'recurrent' or self.architecture == 'latentode' or self.architecture == 'graphlatentode':
                 
                 ### calculate the "true" emebeddings
                 fluid_edge_lst = []
@@ -420,38 +533,72 @@ class MDSimNet(pl.LightningModule):
                                                             self.nbrlst_to_edge_mask,
                                                             'all')
                     fluid_edge_lst += [fluid_edge_tsr]
+            
+            if self.architecture == 'graphlatentode':
 
-                pos_res, vel_res, emb_res = self.pnet_model(pos_lst,
+                integration_time = pos_lst.size()[0]
+                node_res, edge_res = self.pnet_model(pos_lst[0:int(integration_time/2)],
+                                        fluid_edge_lst[0:int(integration_time/2)],
+                                        vel_lst[0:int(integration_time/2)],
+                                        int(integration_time/2),
+                                        )
+
+                edge_gt = []
+                c=1
+                for i in range(int(integration_time/2),integration_time):
+                    edge_gt.append(self.pnet_model.get_edge_weight_matrix(pos_lst[i], fluid_edge_lst[i], c))
+
+                edge_gt = torch.stack(edge_gt)
+
+                node_loss = nn.MSELoss()(pos_lst[int(integration_time/2):], node_res.permute(1, 0, 2))
+
+                edge_loss = nn.MSELoss()(edge_res, edge_gt.view_as(edge_res).cuda())
+
+                self.log('val node', node_loss, on_step=True, prog_bar=True, logger=True)
+                self.log('val edge', edge_loss, on_step=True, prog_bar=True, logger=True)
+                self.log('val all', edge_loss+node_loss, on_step=True, prog_bar=True, logger=True)
+                return
+
+            if self.architecture == 'recurrent' or self.architecture == 'latentode':
+            
+                pos_res, vel_res, force_res = self.pnet_model(pos_lst,
                                         fluid_edge_lst,
                                         vel_lst,
                                         integration_time,
                                         )
 
+            #with torch.no_grad():
+            #    emb_lst = self.pnet_model.encoder(pos_lst, fluid_edge_lst, vel_lst).view_as(emb_res)
 
             if self.loss_fn == 'mae':
                 cord_loss = nn.L1Loss()(pos_lst, pos_res)
                 #rec_loss = nn.L1Loss()(graphem1, graphem2)
                 #force_loss = nn.L1Loss()(pred_forces, forces_gt)
                 vel_loss = nn.L1Loss()(vel_lst, vel_res)
+                #emb_loss = nn.L1Loss()(emb_lst, emb_res)
             else:
                 cord_loss = nn.MSELoss()(pos_lst, pos_res)
                 #rec_loss = nn.MSELoss()(graphem1, graphem2)
                 #force_loss = nn.MSELoss()(pred_forces, forces_gt)
                 vel_loss = nn.MSELoss()(vel_lst, vel_res)
+                #emb_loss = nn.L1Loss()(emb_lst, emb_res)
 
             #regularization_loss = (torch.mean(graphem1)).abs()
 
-            #loss = cord_loss + rec_loss + 0.5/regularization_loss
+            #temp = self.get_temp_pairs(pos_res)
+            #temp_true = torch.full_like(temp, fill_value=float(100))
+
+            #temp_loss = nn.MSELoss()(temp, temp_true)
+            #temp_loss = self.custom_loss(temp, torch.full_like(temp, fill_value=float(100)))
 
             #conservative_loss = (torch.mean(pred)).abs() #conservative loss penalizes size of the predictions (remove it, leave it?)
-            loss = cord_loss# + 0.1*vel_loss
+            #loss = cord_loss #+ 0.1*vel_loss #+ LAMBDA2 * conservative_loss
 
             self.log('val_cord_loss', cord_loss, on_step=True, prog_bar=True, logger=True)
             self.log('val_vel_loss', vel_loss, on_step=True, prog_bar=True, logger=True)
             #self.log('force_loss', force_loss, on_step=True, prog_bar=True, logger=True)
             #self.log('graph rec loss', rec_loss, on_step=True, prog_bar=True, logger=True)
             self.log(f'val loss:{self.loss_fn}', loss, on_step=True, prog_bar=True, logger=True)
-
 
 class ModelCheckpointAtEpochEnd(pl.Callback):
     """
@@ -484,8 +631,10 @@ class ModelCheckpointAtEpochEnd(pl.Callback):
             ckpt_path = os.path.join(trainer.checkpoint_callback.dirpath, filename)
             trainer.save_checkpoint(ckpt_path)
             np.savez(scaler_filename,
-                     mean=pl_module.training_mean,
-                     var=pl_module.training_var,
+                     mean_vel=pl_module.training_mean_vel,
+                     var_vel=pl_module.training_var_vel,
+                     mean_pos=pl_module.training_mean_pos,
+                     var_pos=pl_module.training_var_pos,
                      )
             # joblib.dump(pl_module.train_data_scaler, scaler_filename)
 
@@ -507,8 +656,6 @@ def train_model(args):
                                  learning_rate=lr,
                                  model_weights_ckpt=weight_ckpt,
                                  batch_size=batch_size,
-                                 mode=mode,
-                                 architecture=architecture,
                                  args=args)
     cwd = os.getcwd()
     model_check_point_dir = os.path.join(cwd, check_point_dir)
@@ -526,7 +673,7 @@ def train_model(args):
                       benchmark=True,
                       distributed_backend='ddp',
                       logger=wandb_logger,
-                      resume_from_checkpoint='/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/ENTIRE_NETWORK_latentODE_extrap_1ts-100t/checkpoint_2620.ckpt',
+                      resume_from_checkpoint='/home/guests/lana_frkin/GAMDplus/code/LJ/model_ckpt/EVERYTHING_20s/checkpoint_20.ckpt',
                       )
     trainer.fit(model)
 
@@ -535,8 +682,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--min_epoch', default = 5000, type=int)
     parser.add_argument('--max_epoch', default = 5000, type=int)
-    parser.add_argument('--lr', default=1e-3, type=float)
-    parser.add_argument('--cp_dir', default='./model_ckpt/ENTIRE_NETWORK_latentODE_extrap_1ts-100t(temp_posttraining)')
+    parser.add_argument('--lr', default=1e-4, type=float)
+    parser.add_argument('--cp_dir', default='./model_ckpt/EVERYTHING_20s_just_node')
     parser.add_argument('--state_ckpt_dir', default=None, type=str)
     parser.add_argument('--batch_size', default=1, type=int)
     parser.add_argument('--encoding_size', default=32, type=int)
@@ -548,7 +695,7 @@ def main():
     parser.add_argument('--data_dir', default='./md_dataset')
     parser.add_argument('--loss', default='mse')
     parser.add_argument('--num_gpu', default=-1, type=int)
-    parser.add_argument('--architecture', default='recurrent', type=str)
+    parser.add_argument('--architecture', default='latentode', type=str)
     parser.add_argument('--mode', default='train', type=str)
     args = parser.parse_args()
     train_model(args)
