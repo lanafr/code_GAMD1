@@ -52,7 +52,6 @@ def compute_masked_likelihood(mu, data ,mask ,mu_gt = None, likelihood_func = No
 def masked_gaussian_log_density(mu, data, obsrv_std, mask=None,temporal_weights=None):
 
 	n_traj, n_timepoints, n_dims = mu.size()  #n_traj = K*N
-
 	assert(data.size()[-1] == n_dims)
 
 	# Shape after permutation: [n_traj, n_traj_samples, n_timepoints, n_dims]

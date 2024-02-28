@@ -1,4 +1,4 @@
-from GRAPH_LATENT_ODE.CG_ODE.lib.base_models import VAE_Baseline
+from GRAPH_LATENT_ODE.lib.base_models import VAE_Baseline
 import torch
 import numpy as np
 import GRAPH_LATENT_ODE.lib.utils as utils

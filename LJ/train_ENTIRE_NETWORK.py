@@ -32,6 +32,8 @@ import time
 from AGAIN_NEW_MODULESS import * ##change thiss
 from train_utils_seq import *
 import pint
+from GRAPH_LATENT_ODE.lib.base_models import VAE_Baseline
+#from train_ENTIRE_NETWORK import test_main_while_training
 
 network_has_been_trained = False
 
@@ -110,6 +112,12 @@ class MDSimNet(pl.LightningModule):
         self.rotate_aug = args.rotate_aug
         self.data_dir = args.data_dir
         self.loss_fn = args.loss
+
+        z0_prior = Normal(torch.Tensor([0.0]).to('cuda'), torch.Tensor([1.]).to('cuda'))
+
+        ## for Coupled ODE
+        self.for_loss = VAE_Baseline(z0_prior, 'cuda')
+
         assert self.loss_fn in ['mae', 'mse']
 
     def load_training_stats(self, scaler_ckpt):
@@ -378,7 +386,7 @@ class MDSimNet(pl.LightningModule):
         if self.architecture == 'graphlatentode':
             
             integration_time = pos_lst.size()[0]
-            node_res, edge_res = self.pnet_model(pos_lst[0:int(integration_time/2)],
+            node_res, edge_res, all_extra_info, temporal_weights = self.pnet_model(pos_lst[0:int(integration_time/2)],
                                     fluid_edge_lst[0:int(integration_time/2)],
                                     vel_lst[0:int(integration_time/2)],
                                     int(integration_time/2),
@@ -392,9 +400,20 @@ class MDSimNet(pl.LightningModule):
 
             node_loss = nn.MSELoss()(pos_lst[int(integration_time/2):], node_res.permute(1, 0, 2))
             edge_loss = nn.MSELoss()(edge_res, edge_gt.view_as(edge_res).cuda())
-            loss = node_loss# + edge_loss
+
             self.log('cord_loss', node_loss, on_step=True, prog_bar=True, logger=True)
             self.log('edge_loss', edge_loss, on_step=True, prog_bar=True, logger=True)
+
+            loss_dict = self.for_loss.just_get_loss(node_res, edge_res, all_extra_info, temporal_weights, pos_lst[int(integration_time/2):].view_as(node_res).cuda(), edge_gt.reshape(1, int(integration_time/2), 258, 258).cuda())
+            loss = loss_dict['loss']
+
+            self.log('loss', loss, on_step=True, prog_bar=True, logger=True)
+            self.log('likelihood', loss_dict['likelihood'], on_step=True, prog_bar=True, logger=True)
+            self.log('MAPE', loss_dict['MAPE'], on_step=True, prog_bar=True, logger=True)
+            self.log('MSE', loss_dict['MSE'], on_step=True, prog_bar=True, logger=True)
+            self.log('kl_first_p', loss_dict['kl_first_p'], on_step=True, prog_bar=True, logger=True)
+            self.log('std_first_p', loss_dict['std_first_p'], on_step=True, prog_bar=True, logger=True)
+
             return loss
 
         if self.architecture == 'recurrent' or self.architecture == 'latentode':  
@@ -447,6 +466,7 @@ class MDSimNet(pl.LightningModule):
         #self.log('force_loss', force_loss, on_step=True, prog_bar=True, logger=True)
         #self.log('graph rec loss', rec_loss, on_step=True, prog_bar=True, logger=True)
         self.log(f'actual loss:{self.loss_fn}', loss, on_step=True, prog_bar=True, logger=True)
+        return loss
 
     def configure_optimizers(self):
             optim = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
@@ -537,7 +557,7 @@ class MDSimNet(pl.LightningModule):
             if self.architecture == 'graphlatentode':
 
                 integration_time = pos_lst.size()[0]
-                node_res, edge_res = self.pnet_model(pos_lst[0:int(integration_time/2)],
+                node_res, edge_res, all_extra_info, temporal_weights = self.pnet_model(pos_lst[0:int(integration_time/2)],
                                         fluid_edge_lst[0:int(integration_time/2)],
                                         vel_lst[0:int(integration_time/2)],
                                         int(integration_time/2),
@@ -557,6 +577,16 @@ class MDSimNet(pl.LightningModule):
                 self.log('val node', node_loss, on_step=True, prog_bar=True, logger=True)
                 self.log('val edge', edge_loss, on_step=True, prog_bar=True, logger=True)
                 self.log('val all', edge_loss+node_loss, on_step=True, prog_bar=True, logger=True)
+                loss_dict = self.for_loss.just_get_loss(node_res, edge_res, all_extra_info, temporal_weights, pos_lst[int(integration_time/2):].view_as(node_res).cuda(), edge_gt.reshape(1, int(integration_time/2), 258, 258).cuda())
+                loss = loss_dict['loss']
+
+                self.log('val loss', loss, on_step=True, prog_bar=True, logger=True)
+                self.log('val likelihood', loss_dict['likelihood'], on_step=True, prog_bar=True, logger=True)
+                self.log('val MAPE', loss_dict['MAPE'], on_step=True, prog_bar=True, logger=True)
+                self.log('val MSE', loss_dict['MSE'], on_step=True, prog_bar=True, logger=True)
+                self.log('val kl_first_p', loss_dict['kl_first_p'], on_step=True, prog_bar=True, logger=True)
+                self.log('val std_first_p', loss_dict['std_first_p'], on_step=True, prog_bar=True, logger=True)
+
                 return
 
             if self.architecture == 'recurrent' or self.architecture == 'latentode':
@@ -608,6 +638,7 @@ class ModelCheckpointAtEpochEnd(pl.Callback):
             self,
             filepath,
             save_step_frequency,
+            architecture,
             prefix="checkpoint",
             prefix1="encoder_checkpoint",
             prefix2="decoder_checkpoint",
@@ -620,6 +651,8 @@ class ModelCheckpointAtEpochEnd(pl.Callback):
         self.filepath = filepath
         self.save_step_frequency = save_step_frequency
         self.prefix = prefix
+        self.architecture = architecture
+        self.just_name = os.path.basename(filepath)
 
     def on_epoch_end(self, trainer: pl.Trainer, pl_module: MDSimNet):
         """ Check if we should save a checkpoint after every train batch """
@@ -627,6 +660,8 @@ class ModelCheckpointAtEpochEnd(pl.Callback):
         if epoch % self.save_step_frequency == 0 or epoch == pl_module.epoch_num -1:
             filename = os.path.join(self.filepath, f"{self.prefix}_{epoch}.ckpt")
             scaler_filename = os.path.join(self.filepath, f"scaler_{epoch}.npz")
+
+            #test_main_while_training(self.just_name, epoch, architecture)
 
             ckpt_path = os.path.join(trainer.checkpoint_callback.dirpath, filename)
             trainer.save_checkpoint(ckpt_path)
@@ -660,7 +695,7 @@ def train_model(args):
     cwd = os.getcwd()
     model_check_point_dir = os.path.join(cwd, check_point_dir)
     os.makedirs(model_check_point_dir, exist_ok=True)
-    epoch_end_callback = ModelCheckpointAtEpochEnd(filepath=model_check_point_dir, save_step_frequency=5)
+    epoch_end_callback = ModelCheckpointAtEpochEnd(filepath=model_check_point_dir, save_step_frequency=5, architecture = architecture)
     checkpoint_callback = pl.callbacks.ModelCheckpoint()
     #early_stop_callback = EarlyStopping(monitor='val coordinates (mse)', patience=5, verbose=False, mode="min")
 
@@ -683,7 +718,7 @@ def main():
     parser.add_argument('--min_epoch', default = 5000, type=int)
     parser.add_argument('--max_epoch', default = 5000, type=int)
     parser.add_argument('--lr', default=1e-4, type=float)
-    parser.add_argument('--cp_dir', default='./model_ckpt/EVERYTHING_20s_just_node')
+    parser.add_argument('--cp_dir', default='./model_ckpt/EVERYTHING_20s_lossfrompaper')
     parser.add_argument('--state_ckpt_dir', default=None, type=str)
     parser.add_argument('--batch_size', default=1, type=int)
     parser.add_argument('--encoding_size', default=32, type=int)

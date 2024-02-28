@@ -1,4 +1,4 @@
-from GRAPH_LATENT_ODE.CG_ODE.lib.likelihood_eval import *
+from GRAPH_LATENT_ODE.lib.likelihood_eval import *
 from torch.distributions.normal import Normal
 from torch.distributions import kl_divergence
 import torch.nn as nn
@@ -12,7 +12,7 @@ import numpy as np
 class VAE_Baseline(nn.Module):
 	def __init__(self,
 		z0_prior, device,
-		obsrv_std = 0.01, 
+		obsrv_std = 0.1, 
 		):
 
 		super(VAE_Baseline, self).__init__()
@@ -90,7 +90,7 @@ class VAE_Baseline(nn.Module):
 
 		print(np.sum(pred_node))
 
-	def compute_all_losses(self, batch_dict_encoder,batch_dict_decoder,batch_dict_graph ,num_atoms,edge_lamda, kl_coef = 1.,istest=False):
+	def compute_all_losses(self, batch_dict_encoder, batch_dict_decoder, batch_dict_graph ,num_atoms,edge_lamda, kl_coef = 1.,istest=False):
 		'''
 
 		:param batch_dict_encoder:
@@ -174,6 +174,99 @@ class VAE_Baseline(nn.Module):
 
 		mse_node = self.get_loss(
 			batch_dict_decoder["data"], pred_node,
+			mask=None, method='MSE', istest=istest)  # [1]
+
+
+
+
+		# loss
+
+		loss = - torch.logsumexp(rec_likelihood - kl_coef * kldiv_z0,0)
+		if torch.isnan(loss):
+			loss = - torch.mean(rec_likelihood - kl_coef * kldiv_z0,0)
+
+
+
+		results = {}
+		results["loss"] = torch.mean(loss)
+		results["likelihood"] = torch.mean(rec_likelihood).data.item()
+		results["MAPE"] = torch.mean(mape_node).data.item()
+		results["MSE"] = torch.mean(mse_node).data.item()
+		results["kl_first_p"] =  kldiv_z0.detach().data.item()
+		results["std_first_p"] = torch.mean(fp_std).detach().data.item()
+
+		# if istest:
+		# 	print("Predicted Inc Deaths are:")
+		# 	print(self.print_out_pred(pred_node,pred_edge))
+		# 	print(self.print_out_pred_sum(pred_node))
+
+		return results
+
+	def just_get_loss(self, pred_node, pred_edge, info, temporal_weights, truth_node_data, truth_edge_data, kl_coef = 1.):
+		
+		# Reshape batch_dict_graph
+		k = truth_edge_data.shape[0]
+		T2 = truth_edge_data.shape[1]
+		truth_graph = torch.reshape(truth_edge_data,(k,T2,-1)) # [K,T,N*N]
+		truth_graph = torch.unsqueeze(truth_graph.permute(0,2,1),dim=3) #[K,N*N,T,1]
+		truth_graph = torch.reshape(truth_graph,(-1,T2,1)) #[K*N*N,T,1]
+
+		# print("get_reconstruction done -- computing likelihood")
+
+		# KL divergence only contains node-level (only z_node are sampled, z_edge are computed from z_node)
+		fp_mu, fp_std, fp_enc = info["first_point"]  # [K*N,D]
+		fp_std = fp_std.abs()
+
+		edge_lamda = 0.1
+
+
+		fp_distr = Normal(fp_mu, fp_std)
+
+
+		assert(torch.sum(fp_std < 0) == 0.)
+		kldiv_z0 = kl_divergence(fp_distr, self.z0_prior)  #[K*N,D_ode_latent]
+
+		if torch.isnan(kldiv_z0).any():
+			print(fp_mu)
+			print(fp_std)
+			raise Exception("kldiv_z0 is Nan!")
+
+		if torch.isinf(kldiv_z0).any():
+			locations = torch.where(kldiv_z0==float("inf"),torch.Tensor([1]).to(fp_mu.device),torch.Tensor([0]).to(fp_mu.device))
+			locations = locations.to("cpu").detach().numpy()
+			mu_locations = fp_mu.to("cpu").detach().numpy()*locations
+			std_locations = fp_std.to("cpu").detach().numpy()*locations
+			_,mu_values = utils.convert_sparse(mu_locations)
+			_,std_values = utils.convert_sparse(std_locations)
+			print(mu_values)
+			print(std_values)
+
+		# Mean over number of latent dimensions
+		# kldiv_z0 shape: [n_traj, n_latent_dims] if prior is a mixture of gaussians (KL is estimated)
+		# kldiv_z0 shape: [1, n_traj, n_latent_dims] if prior is a standard gaussian (KL is computed exactly)
+		# shape after: [1]
+		kldiv_z0 = torch.mean(kldiv_z0)  # Contains infinity.
+
+
+		# Compute likelihood of all the points
+		rec_likelihood_node = self.get_gaussian_likelihood(
+			truth_node_data, pred_node,temporal_weights,
+			mask=None)   #negative value
+
+		rec_likelihood_edge = self.get_gaussian_likelihood(
+			truth_graph, pred_edge, temporal_weights,
+			mask=None)  # negative value
+
+		rec_likelihood = (1-edge_lamda)*rec_likelihood_node + edge_lamda * rec_likelihood_edge
+
+		istest = False
+
+		mape_node = self.get_loss(
+			truth_node_data, pred_node,truth_gt=None,#=batch_dict_decoder["data_gt"],
+			mask=None,method = 'MAPE',istest = istest)  # [1]
+
+		mse_node = self.get_loss(
+			truth_node_data, pred_node,
 			mask=None, method='MSE', istest=istest)  # [1]
 
 

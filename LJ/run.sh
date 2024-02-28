@@ -62,10 +62,10 @@ export PATH="/home/guests/lana_frkin/.local/bin:$PATH"
 #python entire_network_test.py
 #python entire_network.py
 #python train_AUTOENCODER.py
-#python train_ENTIRE_NETWORK.py --mode train --architecture graphlatentode
+python train_ENTIRE_NETWORK.py --mode train --architecture graphlatentode
 #python RNN_sequential_network.py
 #python entire_network_RNN.py
-python TEST_entire_network.py --cp_name EVERYTHING_20s_just_node --epoch 30 --architecture graphlatentode
+#python TEST_entire_network.py --cp_name EVERYTHING_20s_just_node --epoch 30 --architecture graphlatentode
 #nvidia-smi
 #python TEST_autoencoder.py --epoch 39 --cp_name 'AUTOENCODER_50ts(cords)_NNConv_512'
 #python change_me_pls.py

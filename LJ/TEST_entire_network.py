@@ -278,3 +278,68 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+def test_main_while_training(cp_name, epoch,architecture, t_from =0, t_how_many = 20, t_rdf_one_snapshot = 9, t_rdf_multiple_snapshots_start = 0, t_rdf_multiple_snapshots_end = 19):
+
+    directory = os.path.join('results_all',f'results_{cp_name}_epoch={epoch}')
+    os.makedirs(directory, exist_ok=True)
+
+    start_pos = []
+    start_vel = []
+
+    if architecture == 'node' or architecture == 'recurrent':
+        start_all = np.load(f'md_dataset/lj_data_20ts/data_0_{t_from}.npz')
+        start_pos = start_all['pos']
+        start_vel = start_all['vel']
+
+    if architecture == 'latentode' or architecture == 'graphlatentode':
+        for i in range (t_from,t_from+int(t_how_many/2)):
+            start_all = np.load(f'md_dataset/lj_data_20ts/data_0_{i}.npz')
+            start_pos.append(start_all['pos'])
+            start_vel.append(start_all['vel'])
+
+    trajectory_real = []
+    trajectory_model = []
+
+    for i in range(t_from,t_from+int(t_how_many/2)): ## changed for graph latent odes
+        everything = np.load(f'md_dataset/lj_data_20ts/data_0_{i}.npz')
+        just_pos = everything['pos']
+        trajectory_real.append(just_pos)
+
+    trajectory_model = network_trajectory(start_pos, start_vel, t_how_many, architecture, cp_name, epoch)
+
+    trajectory_real_np= np.stack(trajectory_real, axis=0)
+    trajectory_model_np = trajectory_model
+
+    trajectory_model_np = np.mod(trajectory_model_np,BOX_SIZE)
+
+    trajectory_real_tensor = torch.tensor(trajectory_real_np)
+    trajectory_model_tensor = torch.tensor(trajectory_model_np)
+
+    loss = nn.MSELoss()(trajectory_real_tensor,trajectory_model_tensor)
+
+    print("Loss is:")
+    print(loss)
+
+    print("Difference is:")
+    print(trajectory_model_np-trajectory_real_np)
+
+    print()
+
+    ## plot rdf graphs
+    rdf_graph_one_snapshot(0, trajectory_real_np, trajectory_model_np, directory, epoch)
+    rdf_graph_one_snapshot(t_rdf_one_snapshot, trajectory_real_np, trajectory_model_np, directory, epoch)
+    rdf_graph_multiple_snapshots(t_rdf_multiple_snapshots_start, int(t_rdf_multiple_snapshots_end/2), trajectory_real_np, trajectory_model_np, directory, epoch)
+
+    ## plot particle trajectories
+    
+    plot_of_trajectory(10, t_rdf_multiple_snapshots_start, t_rdf_multiple_snapshots_end, trajectory_real_np, trajectory_model_np, directory)
+    plot_of_trajectory(50, t_rdf_multiple_snapshots_start, t_rdf_multiple_snapshots_end, trajectory_real_np, trajectory_model_np, directory)
+    plot_of_trajectory(88, t_rdf_multiple_snapshots_start, t_rdf_multiple_snapshots_end, trajectory_real_np, trajectory_model_np, directory)
+    plot_of_trajectory(100, t_rdf_multiple_snapshots_start, t_rdf_multiple_snapshots_end, trajectory_real_np, trajectory_model_np, directory)
+    plot_of_trajectory(199, t_rdf_multiple_snapshots_start, t_rdf_multiple_snapshots_end, trajectory_real_np, trajectory_model_np, directory)
+
+    ## save trajectory data
+    file_path = os.path.join(directory, f'trajectory_data_t=0-{t_how_many}.xyz')
+    #np.save(file_path, trajectory_model_np)
+    save_xyz_from_numpy(trajectory_model_np, file_path)

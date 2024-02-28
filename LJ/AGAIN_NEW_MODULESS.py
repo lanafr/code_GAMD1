@@ -119,7 +119,7 @@ class latentODE(nn.Module):
                                             timesteps_to_predict,
                                             258)
 
-        return pred_node, pred_edges
+        return pred_node, pred_edges, all_extra_info, temporal_weights
 
 class EntireModel(nn.Module):
     def __init__(self,
@@ -162,9 +162,9 @@ class EntireModel(nn.Module):
 
         graph_data_1, edge_num_1 = self.make_one(feature.detach().cpu().numpy(), edge.detach().cpu().numpy(), time)
 
-        pred_node, pred_edges = self.latentODE(graph_data_1, t*2)
+        pred_node, pred_edges, all_extra_info, temporal_weights = self.latentODE(graph_data_1, t*2)
 
-        return pred_node, pred_edges
+        return pred_node, pred_edges, all_extra_info, temporal_weights
 
     def get_edge_weight(self,
                         fluid_pos,
